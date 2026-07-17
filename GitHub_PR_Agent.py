@@ -116,12 +116,14 @@ class GitHubPRAgent:
         self.gh_clone_dir = ""
         self.gh_branch = ""
         self.gh_default_branch = "main"
+        self.gh_scopes = None
 
         # ---- publish-tab state ----
         self.pub_repo_full = ""
         self.pub_repo_url = ""
         self.pub_default_branch = "main"
         self.pub_source_dir = ""
+        self.pub_repo_private = False
         self._status_labels = []
 
         self.git_exe = find_git()
@@ -509,6 +511,9 @@ class GitHubPRAgent:
         try:
             with urllib.request.urlopen(req, timeout=30) as resp:
                 raw = resp.read().decode("utf-8")
+                scopes = resp.headers.get("X-OAuth-Scopes")
+                if scopes is not None:
+                    self.gh_scopes = scopes
                 return resp.status, (json.loads(raw) if raw.strip() else {})
         except urllib.error.HTTPError as e:
             raw = e.read().decode("utf-8", "replace")
@@ -594,6 +599,17 @@ class GitHubPRAgent:
             _, user = self._api("GET", "/user")
             self.gh_user = user.get("login", "")
             self.log(f"Connected as {self.gh_user}", "OK")
+            if self.gh_scopes is not None:
+                shown = self.gh_scopes.strip()
+                if shown:
+                    self.log(f"Classic token scopes: {shown}")
+                    if "repo" not in shown and "public_repo" not in shown:
+                        self.log("Warning: token lacks 'repo'/'public_repo' scope — creating "
+                                 "repositories and forking will fail. Regenerate a CLASSIC token "
+                                 "with the 'repo' scope.", "WARN")
+                else:
+                    self.log("Fine-grained token detected. To create repos it needs "
+                             "Account permission 'Administration' (repo creation) = Read/Write.", "WARN")
             self.root.after(0, self._refresh_status)
         self._async(work, "Connect")
 
@@ -934,18 +950,28 @@ class GitHubPRAgent:
             if not name:
                 raise RuntimeError("Enter a repository name.")
             full = f"{self.gh_user}/{name}"
+
+            # Does it already exist? Only a 404 means "no" — surface anything else.
+            exists = False
             try:
                 s, info = self._api("GET", f"/repos/{full}")
-                if s == 200:
-                    self.pub_repo_full = info.get("full_name", full)
-                    self.pub_repo_url = info.get("html_url", "")
-                    self.pub_default_branch = info.get("default_branch", "main")
-                    self.log(f"Repository already exists, reusing: {self.pub_repo_full}", "OK")
-                    self.root.after(0, lambda: self.pub_repo_label.config(text=f"\u2192 {self.pub_repo_full}"))
-                    self.save_config()
-                    return
-            except Exception:
-                pass
+                exists = (s == 200)
+            except RuntimeError as e:
+                if "404" not in str(e):
+                    raise
+            if exists:
+                self.pub_repo_full = info.get("full_name", full)
+                self.pub_repo_url = info.get("html_url", f"https://github.com/{full}")
+                self.pub_default_branch = info.get("default_branch", "main")
+                self.pub_repo_private = bool(info.get("private"))
+                self.log(f"Repository already exists, reusing: {self.pub_repo_url}", "OK")
+                if info.get("private"):
+                    self.log("Note: this repo is PRIVATE — it 404s in a browser not signed in "
+                             "as its owner.", "WARN")
+                self.root.after(0, lambda: self.pub_repo_label.config(text=f"\u2192 {self.pub_repo_full}"))
+                self.save_config()
+                return
+
             payload = {
                 "name": name,
                 "description": self.pub_desc_var.get().strip(),
@@ -953,11 +979,40 @@ class GitHubPRAgent:
                 "auto_init": False,
             }
             self.log(f"Creating repository {full} \u2026")
-            _, info = self._api("POST", "/user/repos", payload)
+            try:
+                _, created = self._api("POST", "/user/repos", payload)
+            except RuntimeError as e:
+                if "403" in str(e) or "404" in str(e):
+                    raise RuntimeError(
+                        f"{e}\n\nGitHub refused to create the repo. Your token cannot create "
+                        "repositories. Use a CLASSIC token with the 'repo' scope, or a fine-grained "
+                        "token with Account permission 'Administration' = Read/Write.")
+                raise
+
+            # Verify it actually exists before reporting success (creation can lag).
+            info = None
+            for _ in range(6):
+                try:
+                    s, info = self._api("GET", f"/repos/{full}")
+                    if s == 200:
+                        break
+                except Exception:
+                    info = None
+                time.sleep(2)
+            if not info:
+                raise RuntimeError(
+                    "The create request returned OK but the repository is not reachable. "
+                    "This usually means the token lacks permission to create repos.")
+
             self.pub_repo_full = info.get("full_name", full)
-            self.pub_repo_url = info.get("html_url", "")
-            self.pub_default_branch = info.get("default_branch") or self.pub_branch_var.get().strip() or "main"
-            self.log(f"Repository created: {self.pub_repo_url}", "OK")
+            self.pub_repo_url = info.get("html_url", f"https://github.com/{full}")
+            self.pub_default_branch = (info.get("default_branch")
+                                       or self.pub_branch_var.get().strip() or "main")
+            self.pub_repo_private = bool(info.get("private"))
+            self.log(f"Repository created and verified: {self.pub_repo_url}", "OK")
+            if info.get("private"):
+                self.log("Note: repo is PRIVATE — it 404s in a browser not signed in as its owner.",
+                         "WARN")
             self.root.after(0, lambda: self.pub_repo_label.config(text=f"\u2192 {self.pub_repo_full}"))
             self.save_config()
         self._async(work, "Create repository")
@@ -1042,6 +1097,11 @@ class GitHubPRAgent:
         if not self.pub_repo_url:
             self.alert("Open repo", "Create the repository first (Step 2).", "info")
             return
+        if self.pub_repo_private:
+            self.alert("Open repo",
+                       "This repository is PRIVATE. GitHub shows a 404 unless the browser is "
+                       "signed in as its owner. Sign in to github.com first, or recreate the "
+                       "repo with 'Private' unchecked.", "warn")
         self.log(f"Opening {self.pub_repo_url}")
         webbrowser.open(self.pub_repo_url)
 
