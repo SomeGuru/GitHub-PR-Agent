@@ -1,0 +1,8 @@
+# GitHub PR Agent — runtime dependencies
+#
+# There are NO third-party runtime dependencies. The app uses only the Python
+# standard library and tkinter (bundled with the standard python.org installer),
+# and a bundled PortableGit for git operations.
+#
+# Build-time only (installed automatically by tools\build_exe.ps1):
+pyinstaller>=6.0
