@@ -44,6 +44,7 @@ import json
 import re
 import time
 import shutil
+import tempfile
 import threading
 import traceback
 import webbrowser
@@ -556,11 +557,22 @@ class GitHubPRAgent:
         return re.sub(r"//[^@/]+@", "//***@", str(text))
 
     def _run_git(self, args, cwd=None):
-        cmd = [self.git_exe] + args
+        # Force non-interactive git: our token is already embedded in the push URL,
+        # so disable every credential helper / prompt. Otherwise PortableGit's
+        # Git Credential Manager can pop a GUI selector that hangs the (captured,
+        # stdin-less) subprocess forever.
+        prefix = ["-c", "credential.helper=",
+                  "-c", "credential.interactive=false",
+                  "-c", "core.askpass="]
+        cmd = [self.git_exe] + prefix + args
         shown = " ".join(self._redact(a) if "@github.com" in a else a for a in cmd)
         self.log(f"$ {shown}")
+        env = dict(os.environ)
+        env["GIT_TERMINAL_PROMPT"] = "0"      # never prompt on the terminal
+        env["GCM_INTERACTIVE"] = "Never"      # never show the GCM GUI
+        env["GIT_ASKPASS"] = ""               # no external askpass program
         proc = subprocess.run(cmd, cwd=cwd, capture_output=True, text=True,
-                              creationflags=NO_WINDOW)
+                              creationflags=NO_WINDOW, env=env)
         out = (proc.stdout or "") + (proc.stderr or "")
         for line in out.splitlines():
             if line.strip():
@@ -575,9 +587,24 @@ class GitHubPRAgent:
 
     def _upstream(self):
         up = self.upstream_var.get().strip()
-        if "/" not in up:
-            raise RuntimeError("Upstream must be in 'owner/repo' form.")
-        owner, repo = up.split("/", 1)
+        # Accept a bare "owner/repo" OR a pasted GitHub URL in many shapes:
+        #   https://github.com/owner/repo
+        #   https://github.com/owner/repo.git
+        #   git@github.com:owner/repo.git
+        #   https://github.com/owner/repo/tree/main/...
+        up = up.strip().strip("<>").strip()
+        # strip scheme + host (http/https/ssh/git@)
+        up = re.sub(r"^[a-zA-Z]+://", "", up)          # https://, ssh://, git://
+        up = re.sub(r"^git@", "", up)                  # git@github.com:owner/repo
+        up = re.sub(r"^[^/]*github\.com[:/]+", "", up)  # host + separator
+        up = up.strip("/")
+        if up.endswith(".git"):
+            up = up[:-4]
+        parts = [p for p in up.split("/") if p]
+        if len(parts) < 2:
+            raise RuntimeError(
+                "Upstream must be 'owner/repo' (or a github.com repo URL).")
+        owner, repo = parts[0], parts[1]              # ignore /tree/..., /blob/...
         return owner.strip(), repo.strip()
 
     # ===== step handlers ===================================================
@@ -623,6 +650,18 @@ class GitHubPRAgent:
                 raise RuntimeError("Connect first (Step 1).")
             owner, repo = self._upstream()
             candidate = f"{self.gh_user}/{repo}"
+            # Verify the upstream is actually reachable with this token first,
+            # so we can give a precise message instead of a raw 404 from /forks.
+            try:
+                s, up_info = self._api("GET", f"/repos/{owner}/{repo}")
+            except RuntimeError as e:
+                if "404" in str(e):
+                    raise RuntimeError(
+                        f"Upstream '{owner}/{repo}' not found (404). Check the owner/repo "
+                        "spelling. If it's a PRIVATE repo, a fine-grained token only sees "
+                        "repos you granted it — use a CLASSIC token with the 'repo' scope, "
+                        "or a fine-grained token scoped to that repository.")
+                raise
             try:
                 s, info = self._api("GET", f"/repos/{candidate}")
                 if s == 200 and info.get("fork"):
@@ -642,6 +681,11 @@ class GitHubPRAgent:
                     raise RuntimeError(
                         "Fork refused (403). Use a CLASSIC token with the 'repo' scope, "
                         "or fork it once in the browser and click Fork again to reuse it.")
+                if "404" in str(e):
+                    raise RuntimeError(
+                        "Fork endpoint returned 404. Your token can read the repo but is "
+                        "not allowed to fork it. Use a CLASSIC token with the 'repo' scope "
+                        "(or 'public_repo' for public repos).")
                 raise
             self.gh_fork_full = info.get("full_name", candidate)
             self.gh_default_branch = info.get("default_branch", "main")
@@ -665,37 +709,116 @@ class GitHubPRAgent:
         if d:
             self.clone_parent_var.set(d)
 
+    @staticmethod
+    def _normalize_dir(raw):
+        """Clean a user-typed folder path: strip quotes/space, expand ~ and %VARS%."""
+        s = (raw or "").strip().strip('"').strip("'").strip()
+        if not s:
+            return ""
+        return os.path.expandvars(os.path.expanduser(s))
+
+    def _ensure_git(self):
+        """Fail early with a clear message if no git executable can be found."""
+        gp = self.git_exe
+        if not (Path(gp).exists() or shutil.which(gp)):
+            raise RuntimeError(
+                "Bundled git was not found. Keep the 'vendor' folder next to the app "
+                "(don't move the .exe out of its folder). Expected: "
+                f"{app_base_dir() / 'vendor' / 'PortableGit' / 'cmd' / 'git.exe'}")
+
+    def _sync_into(self, src, dst):
+        """Copy files from src into dst, replacing only those that differ by size
+        or modified-time. Returns (added, updated, unchanged) counts."""
+        src, dst = Path(src), Path(dst)
+        added = updated = unchanged = 0
+        for root, _dirs, files in os.walk(src):
+            rel = Path(root).relative_to(src)
+            target_root = dst / rel
+            target_root.mkdir(parents=True, exist_ok=True)
+            for name in files:
+                sfile = Path(root) / name
+                dfile = target_root / name
+                try:
+                    if not dfile.exists():
+                        shutil.copy2(sfile, dfile); added += 1
+                    else:
+                        ss, ds = sfile.stat(), dfile.stat()
+                        if ss.st_size != ds.st_size or int(ss.st_mtime) != int(ds.st_mtime):
+                            shutil.copy2(sfile, dfile); updated += 1
+                        else:
+                            unchanged += 1
+                except OSError as e:
+                    self.log(f"  skip {dfile}: {e}", "WARN")
+        return added, updated, unchanged
+
     def _clone(self):
         def work():
+            self._ensure_git()
             if not self.gh_fork_full:
                 raise RuntimeError("Fork first (Step 2).")
             _, repo = self._upstream()
-            parent = Path(self.clone_parent_var.get().strip())
+            parent_str = self._normalize_dir(self.clone_parent_var.get())
+            if not parent_str:
+                parent_str = str(Path.home())
+                self.log(f"No destination given — using {parent_str}", "WARN")
+            parent = Path(parent_str)
             dest = parent / repo
+            url = f"https://github.com/{self.gh_fork_full}.git"
+
+            # Make sure the destination parent exists (auto-create).
+            try:
+                parent.mkdir(parents=True, exist_ok=True)
+            except OSError as e:
+                raise RuntimeError(f"Cannot create destination folder '{parent}': {e}")
+
+            owner, urepo = self._upstream()
+
+            # Case 1: existing git repo — just refresh it.
+            if (dest / ".git").exists():
+                self.log(f"Clone exists at {dest} — fetching latest \u2026")
+                self._run_git(["-C", str(dest), "fetch", "origin"])
+                self._finish_clone(dest, owner, urepo)
+                return
+
+            # Case 2: folder exists with content but is NOT a git repo — clone to a
+            # temp dir and reconcile by size/date/time instead of failing.
             if dest.exists() and any(dest.iterdir()):
-                if (dest / ".git").exists():
-                    self.log(f"Clone exists at {dest} — fetching latest \u2026")
-                    self._run_git(["-C", str(dest), "fetch", "origin"])
-                    self.gh_clone_dir = str(dest)
-                    self.root.after(0, lambda: self.clone_label.config(text=str(dest)))
-                    self.save_config()
-                    return
-                raise RuntimeError(f"Target exists and is not a git repo: {dest}")
-            parent.mkdir(parents=True, exist_ok=True)
-            rc, _ = self._run_git(["clone", f"https://github.com/{self.gh_fork_full}.git", str(dest)])
+                self.log(f"Target '{dest}' already exists — cloning to a temp area and "
+                         "reconciling changed files (by size + modified time) \u2026", "WARN")
+                tmp = Path(tempfile.mkdtemp(prefix="prclone_"))
+                tmp_clone = tmp / repo
+                rc, _ = self._run_git(["clone", url, str(tmp_clone)])
+                if rc != 0:
+                    shutil.rmtree(tmp, ignore_errors=True)
+                    raise RuntimeError("git clone failed (see terminal).")
+                added, updated, unchanged = self._sync_into(tmp_clone, dest)
+                shutil.rmtree(tmp, ignore_errors=True)
+                self.log(f"Reconciled into {dest}: {added} added, {updated} updated, "
+                         f"{unchanged} unchanged", "OK")
+                self._finish_clone(dest, owner, urepo)
+                return
+
+            # Case 3: fresh clone into a new/empty folder.
+            rc, _ = self._run_git(["clone", url, str(dest)])
             if rc != 0:
                 raise RuntimeError("git clone failed (see terminal).")
-            self._run_git(["-C", str(dest), "config", "user.name", self.gh_user])
-            self._run_git(["-C", str(dest), "config", "user.email",
-                           f"{self.gh_user}@users.noreply.github.com"])
-            owner, urepo = self._upstream()
-            self._run_git(["-C", str(dest), "remote", "add", "upstream",
-                           f"https://github.com/{owner}/{urepo}.git"])
-            self.gh_clone_dir = str(dest)
-            self.log(f"Cloned to {dest}", "OK")
-            self.root.after(0, lambda: self.clone_label.config(text=str(dest)))
-            self.save_config()
+            self._finish_clone(dest, owner, urepo)
         self._async(work, "Clone")
+
+    def _finish_clone(self, dest, owner, urepo):
+        """Common post-clone setup: identity, upstream remote, persist location."""
+        self._run_git(["-C", str(dest), "config", "user.name", self.gh_user])
+        self._run_git(["-C", str(dest), "config", "user.email",
+                       f"{self.gh_user}@users.noreply.github.com"])
+        # (Re)point the 'upstream' remote at the source repo.
+        rc, _ = self._run_git(["-C", str(dest), "remote", "get-url", "upstream"])
+        verb = "set-url" if rc == 0 else "add"
+        self._run_git(["-C", str(dest), "remote", verb, "upstream",
+                       f"https://github.com/{owner}/{urepo}.git"])
+        self.gh_clone_dir = str(dest)
+        self.log(f"Clone ready at {dest}", "OK")
+        self.root.after(0, lambda: self.clone_label.config(text=str(dest)))
+        self.save_config()
 
     # ---- Step 4 ----
     def _merge_mode_changed(self):
@@ -1031,6 +1154,28 @@ class GitHubPRAgent:
                 raise RuntimeError("Choose a valid local folder to push.")
             if not any(src.iterdir()):
                 raise RuntimeError("The selected folder is empty.")
+
+            # Guard against GitHub's hard 100 MB-per-file limit and warn on bloat.
+            oversized, total = [], 0
+            for f in src.rglob("*"):
+                if f.is_file() and ".git" not in f.relative_to(src).parts:
+                    try:
+                        sz = f.stat().st_size
+                    except OSError:
+                        continue
+                    total += sz
+                    if sz > 95 * 1024 * 1024:
+                        oversized.append((f.relative_to(src).as_posix(), sz))
+            if oversized:
+                lst = "\n".join(f"  {p} ({s // (1024*1024)} MB)" for p, s in oversized[:10])
+                raise RuntimeError(
+                    "These files exceed GitHub's 100 MB per-file limit, so the whole push "
+                    "would be rejected. Remove or .gitignore them first:\n\n" + lst)
+            if total > 150 * 1024 * 1024:
+                self.log(f"Warning: pushing ~{total // (1024*1024)} MB. If this folder contains "
+                         "build artifacts (vendor/, dist/, build/), add a .gitignore so only your "
+                         "source is published.", "WARN")
+
             d = str(src)
             branch = self.pub_branch_var.get().strip() or "main"
             if not (src / ".git").exists():
