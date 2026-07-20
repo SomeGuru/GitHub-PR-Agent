@@ -13,6 +13,15 @@ script when the remote is newer.
 additions, minor for features, major for breaking changes) and adds a dated entry
 here. Do not batch multiple change-sets under one version.
 
+## v1.2.1 — 2026-07-20
+
+- **Auto-restart after update:** applying an update now backs up the current
+  script, writes the new version, saves config, launches the updated script as a
+  detached process, and closes the current window automatically — no manual
+  restart. If the relaunch fails, the app warns and asks the user to reopen
+  manually instead of exiting silently. (Packaged EXE builds still require a
+  rebuild.)
+
 ## v1.2.0 — 2026-07-20
 
 - **Per-tab config export/import:** each tab now has **💾 Save this tab…** and
