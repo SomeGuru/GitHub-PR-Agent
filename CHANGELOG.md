@@ -23,6 +23,9 @@ script when the remote is newer.
   `GitHub_PR_Agent.py` from the update repo, backs up the current script, replaces
   it, and prompts to restart.
 - **Version display:** the current version is shown next to the terminal buttons.
+- **Workflow-scope guard:** when the release agent is enabled, the push is blocked
+  early with a clear message if the token lacks the `workflow` scope, and a remote
+  rejection for the same reason is translated into actionable guidance.
 
 ## v1.0.0
 

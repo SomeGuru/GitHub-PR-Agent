@@ -466,6 +466,10 @@ class GitHubPRAgent:
         ]
         for c in self._rel_checks:
             c.pack(side="left", padx=8)
+        ttk.Label(sr, foreground="#666", wraplength=1100, justify="left",
+                  text=("Note: pushing workflow files requires a token with the 'workflow' scope "
+                        "(in addition to 'repo'). Tag a commit 'vX.Y.Z' to trigger a release.")
+                  ).pack(anchor="w", padx=26, pady=(0, 6))
         self._rel_toggle()
 
         # Step 3 — Push files
@@ -1197,6 +1201,19 @@ class GitHubPRAgent:
             if not any(src.iterdir()):
                 raise RuntimeError("The selected folder is empty.")
 
+            # Pushing .github/workflows/* requires the token's 'workflow' scope.
+            # Classic tokens report scopes via the API; block early with a clear
+            # message rather than committing and hitting a remote rejection.
+            if self.rel_enable_var.get():
+                scope_set = {s.strip() for s in (self.gh_scopes or "").split(",") if s.strip()}
+                if scope_set and "workflow" not in scope_set:
+                    raise RuntimeError(
+                        "The release agent writes '.github/workflows/release.yml', but your "
+                        "token cannot push workflow files.\n\n"
+                        "Fix: add the 'workflow' scope to your classic PAT (keep 'repo' too) at "
+                        "github.com/settings/tokens, reconnect, and push again \u2014 OR uncheck "
+                        "'Add a GitHub release agent' to publish without the workflow.")
+
             # Guard against GitHub's hard 100 MB-per-file limit and warn on bloat.
             oversized, total = [], 0
             for f in src.rglob("*"):
@@ -1241,9 +1258,16 @@ class GitHubPRAgent:
                                      self.pub_commit_var.get().strip() or "Initial commit"])
             if rc != 0 and "nothing to commit" not in out.lower():
                 raise RuntimeError("git commit failed (see terminal).")
-            rc, _ = self._run_git(["-C", d, "push", self._auth_url_for(self.pub_repo_full),
-                                   f"HEAD:{branch}", "--force"])
+            rc, out = self._run_git(["-C", d, "push", self._auth_url_for(self.pub_repo_full),
+                                     f"HEAD:{branch}", "--force"])
             if rc != 0:
+                low = out.lower()
+                if "workflow" in low and "scope" in low:
+                    raise RuntimeError(
+                        "GitHub rejected the push because the token lacks the 'workflow' scope "
+                        "required to create/update '.github/workflows/release.yml'.\n\n"
+                        "Add the 'workflow' scope to your PAT and reconnect, or uncheck "
+                        "'Add a GitHub release agent', then push again.")
                 raise RuntimeError("git push failed (see terminal).")
             self.pub_default_branch = branch
             self.pub_source_dir = d
