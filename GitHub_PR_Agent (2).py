@@ -29,16 +29,6 @@ State (everything EXCEPT the token) is remembered between runs in
 %LOCALAPPDATA%/GitHubPRAgent/config.json so steps can be reused for re-execution.
 The Personal Access Token is held in memory only and is never written to disk or
 to .git/config, and is redacted from all log output.
-
-Optional PAT vault
-------------------
-Via the "PAT Vault" button, the token can be stored ENCRYPTED at rest in
-%LOCALAPPDATA%/GitHubPRAgent/vault.json, protected by a user-chosen master
-passphrase (PBKDF2-HMAC-SHA256 key derivation + HMAC-SHA256 stream cipher with
-encrypt-then-MAC authentication; standard-library only). Unlocking with the
-master passphrase decrypts the PAT back into the Step 1 field. Entering the
-reset passphrase "MikeLariosWasHere!" wipes the vault (for a forgotten
-passphrase); it deletes the stored token without ever revealing it.
 """
 
 # --- stdio guard (must precede any print / tk under pythonw / --windowed) ---
@@ -53,11 +43,7 @@ if sys.stderr is None:
 import json
 import re
 import time
-import hmac
-import base64
 import shutil
-import secrets
-import hashlib
 import tempfile
 import threading
 import traceback
@@ -72,19 +58,9 @@ import tkinter as tk
 from tkinter import ttk, filedialog, messagebox, scrolledtext
 
 APP_NAME = "GitHub PR Agent"
-APP_VERSION = "1.3.0"
+APP_VERSION = "1.2.2"
 CONFIG_DIR = Path(os.environ.get("LOCALAPPDATA", str(Path.home()))) / "GitHubPRAgent"
 CONFIG_FILE = CONFIG_DIR / "config.json"
-
-# ---- PAT vault ------------------------------------------------------------
-# The Personal Access Token can optionally be stored ENCRYPTED at rest in this
-# file, protected by a user-chosen master passphrase. It is decrypted back into
-# the Step 1 token field on demand. The master reset passphrase below wipes the
-# whole vault (used when the master passphrase is forgotten); it never reveals
-# the stored token — it only deletes it.
-VAULT_FILE = CONFIG_DIR / "vault.json"
-VAULT_RESET_PHRASE = "MikeLariosWasHere!"
-VAULT_KDF_ITERATIONS = 200_000
 
 # ---- self-update source ---------------------------------------------------
 # The agent can update itself by downloading the newest GitHub_PR_Agent.py from
@@ -137,68 +113,6 @@ def find_git() -> str:
         return which
     # Last resort — let subprocess try the PATH and surface a clear error later.
     return "git"
-
-
-# ---------------------------------------------------------------------------
-# PAT vault crypto — stdlib only (no third-party packages).
-#
-# Reversible authenticated encryption built from PBKDF2 + HMAC-SHA256:
-#   * PBKDF2-HMAC-SHA256 stretches the passphrase (with a random salt) into a
-#     64-byte key that is split into an encryption key and a MAC key.
-#   * A keystream is produced by HMAC-SHA256(enc_key, nonce || counter) in
-#     counter mode and XOR-ed with the plaintext (a stream cipher).
-#   * Encrypt-then-MAC: HMAC-SHA256(mac_key, nonce || ciphertext) authenticates
-#     the data, so a wrong passphrase or any tampering is detected on decrypt.
-# This is the standard construction for reversible secret storage without AES.
-# ---------------------------------------------------------------------------
-def _vault_derive_keys(passphrase: str, salt: bytes, iterations: int) -> tuple:
-    dk = hashlib.pbkdf2_hmac("sha256", passphrase.encode("utf-8"), salt, iterations, dklen=64)
-    return dk[:32], dk[32:]
-
-
-def _vault_keystream(enc_key: bytes, nonce: bytes, length: int) -> bytes:
-    out = bytearray()
-    counter = 0
-    while len(out) < length:
-        out.extend(hmac.new(enc_key, nonce + counter.to_bytes(8, "big"), hashlib.sha256).digest())
-        counter += 1
-    return bytes(out[:length])
-
-
-def vault_encrypt(passphrase: str, plaintext: str) -> dict:
-    salt = secrets.token_bytes(16)
-    nonce = secrets.token_bytes(16)
-    enc_key, mac_key = _vault_derive_keys(passphrase, salt, VAULT_KDF_ITERATIONS)
-    pt = plaintext.encode("utf-8")
-    ks = _vault_keystream(enc_key, nonce, len(pt))
-    ct = bytes(a ^ b for a, b in zip(pt, ks))
-    tag = hmac.new(mac_key, nonce + ct, hashlib.sha256).digest()
-    return {
-        "v": 1,
-        "kdf": "pbkdf2-sha256",
-        "iter": VAULT_KDF_ITERATIONS,
-        "salt": base64.b64encode(salt).decode("ascii"),
-        "nonce": base64.b64encode(nonce).decode("ascii"),
-        "ct": base64.b64encode(ct).decode("ascii"),
-        "tag": base64.b64encode(tag).decode("ascii"),
-    }
-
-
-def vault_decrypt(passphrase: str, blob: dict) -> str:
-    try:
-        salt = base64.b64decode(blob["salt"])
-        nonce = base64.b64decode(blob["nonce"])
-        ct = base64.b64decode(blob["ct"])
-        tag = base64.b64decode(blob["tag"])
-        iterations = int(blob.get("iter", VAULT_KDF_ITERATIONS))
-    except (KeyError, ValueError, TypeError) as e:
-        raise ValueError("Vault file is malformed or corrupted.") from e
-    enc_key, mac_key = _vault_derive_keys(passphrase, salt, iterations)
-    expected = hmac.new(mac_key, nonce + ct, hashlib.sha256).digest()
-    if not hmac.compare_digest(expected, tag):
-        raise ValueError("Wrong passphrase, or the vault has been tampered with.")
-    ks = _vault_keystream(enc_key, nonce, len(ct))
-    return bytes(a ^ b for a, b in zip(ct, ks)).decode("utf-8")
 
 
 # ---------------------------------------------------------------------------
@@ -436,7 +350,6 @@ class GitHubPRAgent:
         btns.pack(fill="x", padx=4, pady=(0, 4))
         ttk.Button(btns, text="Clear log", command=lambda: self.console.delete("1.0", "end")).pack(side="left")
         ttk.Button(btns, text="Save config now", command=self.save_config).pack(side="left", padx=6)
-        ttk.Button(btns, text="\U0001f512 PAT Vault", command=self.open_vault).pack(side="left", padx=6)
         ttk.Button(btns, text="\u2b73 Check for updates", command=self._check_for_updates).pack(side="left", padx=6)
         ttk.Label(btns, text=f"v{APP_VERSION}", foreground="#888").pack(side="right", padx=6)
 
@@ -474,7 +387,6 @@ class GitHubPRAgent:
         ttk.Checkbutton(row, text="Show PAT", variable=self.show_var,
                         command=self._toggle_token).pack(side="left")
         ttk.Button(row, text="\U0001f517 Connect", command=self._connect).pack(side="left", padx=6)
-        ttk.Button(row, text="\U0001f512 Vault", command=self.open_vault).pack(side="left")
         self.status_label = ttk.Label(row, text="Not connected", foreground="#a00")
         self.status_label.pack(side="left", padx=8)
         self._status_labels.append(self.status_label)
@@ -625,7 +537,6 @@ class GitHubPRAgent:
         ttk.Checkbutton(row, text="Show PAT", variable=self.pub_show_var,
                         command=self._pub_toggle_token).pack(side="left")
         ttk.Button(row, text="\U0001f517 Log in", command=self._pub_connect).pack(side="left", padx=6)
-        ttk.Button(row, text="\U0001f512 Vault", command=self.open_vault).pack(side="left")
         self.pub_status_label = ttk.Label(row, text="Not connected", foreground="#a00")
         self.pub_status_label.pack(side="left", padx=8)
         self._status_labels.append(self.pub_status_label)
@@ -1317,169 +1228,6 @@ class GitHubPRAgent:
 
     def _pub_connect(self):
         self._do_connect(self.pub_token_var.get())
-
-    # ===== PAT vault (encrypted-at-rest token storage) ====================
-    def _vault_current_pat(self) -> str:
-        """The PAT to store: whichever Step 1 field/connection has one."""
-        for var_name in ("token_var", "pub_token_var"):
-            var = getattr(self, var_name, None)
-            if var is not None and var.get().strip():
-                return var.get().strip()
-        return (self.gh_token or "").strip()
-
-    def _vault_fill_step1(self, token: str):
-        """Load a recovered PAT back into both Step 1 token fields."""
-        if hasattr(self, "token_var"):
-            self.token_var.set(token)
-        if hasattr(self, "pub_token_var"):
-            self.pub_token_var.set(token)
-
-    def open_vault(self):
-        """Modal dialog to save / unlock / reset the encrypted PAT vault."""
-        win = tk.Toplevel(self.root)
-        win.title("\U0001f512 PAT Vault")
-        win.transient(self.root)
-        win.resizable(False, False)
-        win.grab_set()
-
-        status = ttk.Label(win, foreground="#444", wraplength=520, justify="left")
-        status.pack(anchor="w", padx=12, pady=(12, 2))
-
-        def refresh_status():
-            if VAULT_FILE.exists():
-                status.config(
-                    text="A PAT is stored encrypted in the vault. Unlock it with your master "
-                         "passphrase to load it back into Step 1.")
-            else:
-                status.config(text="The vault is empty. Save a PAT below to store it encrypted at rest.")
-
-        refresh_status()
-
-        show_pw = tk.BooleanVar(value=False)
-        entries = []
-
-        def make_pw_entry(parent):
-            e = ttk.Entry(parent, show="\u2022", width=34)
-            entries.append(e)
-            return e
-
-        # --- Save current PAT --------------------------------------------
-        save_fr = ttk.LabelFrame(win, text="Save current PAT to the vault")
-        save_fr.pack(fill="x", padx=12, pady=6)
-        sr1 = ttk.Frame(save_fr); sr1.pack(fill="x", padx=6, pady=3)
-        ttk.Label(sr1, text="Master passphrase:", width=20).pack(side="left")
-        save_pw = make_pw_entry(sr1); save_pw.pack(side="left", padx=4)
-        sr2 = ttk.Frame(save_fr); sr2.pack(fill="x", padx=6, pady=3)
-        ttk.Label(sr2, text="Confirm passphrase:", width=20).pack(side="left")
-        save_pw2 = make_pw_entry(sr2); save_pw2.pack(side="left", padx=4)
-        sr3 = ttk.Frame(save_fr); sr3.pack(fill="x", padx=6, pady=(3, 6))
-
-        def do_save():
-            pat = self._vault_current_pat()
-            if not pat:
-                self.alert("PAT Vault", "No PAT found. Enter your token in Step 1 first.", "warn")
-                return
-            p1, p2 = save_pw.get(), save_pw2.get()
-            if len(p1) < 4:
-                self.alert("PAT Vault", "Choose a master passphrase of at least 4 characters.", "warn")
-                return
-            if p1 != p2:
-                self.alert("PAT Vault", "The two passphrases do not match.", "warn")
-                return
-            if p1 == VAULT_RESET_PHRASE:
-                self.alert("PAT Vault", "That passphrase is reserved for resetting the vault. "
-                                        "Please choose a different master passphrase.", "warn")
-                return
-            try:
-                CONFIG_DIR.mkdir(parents=True, exist_ok=True)
-                blob = vault_encrypt(p1, pat)
-                VAULT_FILE.write_text(json.dumps(blob, indent=2), encoding="utf-8")
-            except Exception as e:
-                self.alert("PAT Vault", f"Could not save the vault: {e}", "error")
-                return
-            save_pw.delete(0, "end"); save_pw2.delete(0, "end")
-            self.log("PAT saved to the encrypted vault.", "OK")
-            refresh_status()
-            self.alert("PAT Vault", "Your PAT is now stored encrypted at rest.", "info")
-
-        ttk.Button(sr3, text="\U0001f512 Encrypt & save to vault", command=do_save).pack(side="left")
-
-        # --- Unlock into Step 1 ------------------------------------------
-        open_fr = ttk.LabelFrame(win, text="Unlock vault \u2192 Step 1 PAT")
-        open_fr.pack(fill="x", padx=12, pady=6)
-        or1 = ttk.Frame(open_fr); or1.pack(fill="x", padx=6, pady=3)
-        ttk.Label(or1, text="Master passphrase:", width=20).pack(side="left")
-        open_pw = make_pw_entry(or1); open_pw.pack(side="left", padx=4)
-        or2 = ttk.Frame(open_fr); or2.pack(fill="x", padx=6, pady=(3, 6))
-
-        def do_unlock():
-            if not VAULT_FILE.exists():
-                self.alert("PAT Vault", "The vault is empty — nothing to unlock.", "info")
-                return
-            try:
-                blob = json.loads(VAULT_FILE.read_text(encoding="utf-8"))
-                token = vault_decrypt(open_pw.get(), blob)
-            except ValueError as e:
-                self.alert("PAT Vault", str(e), "error")
-                return
-            except Exception as e:
-                self.alert("PAT Vault", f"Could not open the vault: {e}", "error")
-                return
-            self._vault_fill_step1(token)
-            open_pw.delete(0, "end")
-            self.log("Vault unlocked \u2014 PAT loaded into Step 1. Click Connect / Log in.", "OK")
-            win.destroy()
-
-        ttk.Button(or2, text="\U0001f513 Unlock & fill Step 1", command=do_unlock).pack(side="left")
-
-        # --- Reset -------------------------------------------------------
-        reset_fr = ttk.LabelFrame(win, text="Reset the whole vault (forgotten passphrase)")
-        reset_fr.pack(fill="x", padx=12, pady=6)
-        rr1 = ttk.Frame(reset_fr); rr1.pack(fill="x", padx=6, pady=3)
-        ttk.Label(rr1, text="Reset passphrase:", width=20).pack(side="left")
-        reset_pw = make_pw_entry(rr1); reset_pw.pack(side="left", padx=4)
-        rr2 = ttk.Frame(reset_fr); rr2.pack(fill="x", padx=6, pady=(3, 6))
-
-        def do_reset():
-            if reset_pw.get() != VAULT_RESET_PHRASE:
-                self.alert("PAT Vault", "Incorrect reset passphrase.", "error")
-                return
-            if not messagebox.askyesno("PAT Vault",
-                                       "This permanently erases the stored PAT from the vault. Continue?"):
-                return
-            try:
-                if VAULT_FILE.exists():
-                    VAULT_FILE.unlink()
-            except Exception as e:
-                self.alert("PAT Vault", f"Could not reset the vault: {e}", "error")
-                return
-            reset_pw.delete(0, "end")
-            self.log("Vault reset \u2014 stored PAT erased.", "WARN")
-            refresh_status()
-            self.alert("PAT Vault", "The vault has been reset and is now empty.", "info")
-
-        ttk.Button(rr2, text="\u267b Reset vault", command=do_reset).pack(side="left")
-
-        # --- shared controls ---------------------------------------------
-        foot = ttk.Frame(win); foot.pack(fill="x", padx=12, pady=(2, 12))
-
-        def toggle_show():
-            ch = "" if show_pw.get() else "\u2022"
-            for e in entries:
-                e.config(show=ch)
-
-        ttk.Checkbutton(foot, text="Show passphrases", variable=show_pw,
-                        command=toggle_show).pack(side="left")
-        ttk.Button(foot, text="Close", command=win.destroy).pack(side="right")
-
-        win.update_idletasks()
-        try:
-            x = self.root.winfo_rootx() + 60
-            y = self.root.winfo_rooty() + 60
-            win.geometry(f"+{x}+{y}")
-        except Exception:
-            pass
-
 
     def _pub_create_repo(self):
         def work():

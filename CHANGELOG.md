@@ -13,6 +13,20 @@ script when the remote is newer.
 additions, minor for features, major for breaking changes) and adds a dated entry
 here. Do not batch multiple change-sets under one version.
 
+## v1.3.0 — 2026-07-20
+
+- **PAT vault (encrypted at rest):** new "🔐 Vault" button (both Step 1 rows and
+  the bottom bar) opens a vault dialog that encrypts the Personal Access Token
+  to `%LOCALAPPDATA%/GitHubPRAgent/vault.json` under a user-chosen master
+  passphrase, and decrypts it back into the Step 1 token field on demand.
+  Encryption is standard-library only: PBKDF2-HMAC-SHA256 key derivation
+  (200k iterations, random salt) + an HMAC-SHA256 counter-mode stream cipher
+  with encrypt-then-MAC authentication (wrong passphrase / tampering is
+  detected). The reserved reset passphrase `MikeLariosWasHere!` wipes the vault
+  for a forgotten master passphrase — it erases the stored token without
+  revealing it. Added `hmac`, `base64`, `secrets`, `hashlib` to the PyInstaller
+  spec hidden imports.
+
 ## v1.2.2 — 2026-07-20
 
 - **Fix CI build:** the release workflow (`.github/workflows/release.yml`)
