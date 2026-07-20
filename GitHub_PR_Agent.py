@@ -1289,13 +1289,24 @@ class GitHubPRAgent:
             if tree.get("truncated"):
                 self.log("Warning: repo tree is truncated by the API; validation may be partial.", "WARN")
             local = []
-            for f in src.rglob("*"):
-                rel = f.relative_to(src)
-                if f.is_file() and ".git" not in rel.parts:
-                    local.append(rel.as_posix())
+            used_git = False
+            if (src / ".git").exists():
+                # Validate only what git would actually push: tracked files,
+                # respecting .gitignore. Avoids false "missing" on ignored files
+                # like __pycache__/*.pyc.
+                rc, out = self._run_git(["-C", str(src), "ls-files"])
+                if rc == 0:
+                    local = [line.strip() for line in out.splitlines() if line.strip()]
+                    used_git = True
+            if not used_git:
+                for f in src.rglob("*"):
+                    rel = f.relative_to(src)
+                    if f.is_file() and ".git" not in rel.parts:
+                        local.append(rel.as_posix())
             missing = sorted(p for p in local if p not in remote)
             present = len(local) - len(missing)
-            self.log(f"Validation: {present}/{len(local)} local file(s) present on repo; "
+            scope_note = " (tracked files only)" if used_git else ""
+            self.log(f"Validation: {present}/{len(local)} local file(s) present on repo{scope_note}; "
                      f"{len(missing)} missing.", "OK" if not missing else "WARN")
             self.root.after(0, lambda: self.pub_validate_label.config(
                 text=(f"{present}/{len(local)} present \u2714" if not missing
@@ -1350,7 +1361,7 @@ class GitHubPRAgent:
         if not gitignore.exists():
             gitignore.write_text(
                 "# Python\n__pycache__/\n*.py[cod]\n*.egg-info/\n.venv/\nvenv/\n"
-                "# Build output\nbuild/\ndist/\n*.spec.bak\n"
+                "# Build output & bundled tooling\nbuild/\ndist/\nvendor/\n*.spec.bak\n"
                 "# OS / editor\n.DS_Store\nThumbs.db\n.idea/\n.vscode/\n",
                 encoding="utf-8")
             created.append(".gitignore")

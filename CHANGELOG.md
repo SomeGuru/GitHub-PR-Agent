@@ -26,6 +26,10 @@ script when the remote is newer.
 - **Workflow-scope guard:** when the release agent is enabled, the push is blocked
   early with a clear message if the token lacks the `workflow` scope, and a remote
   rejection for the same reason is translated into actionable guidance.
+- **Accurate validation:** the "Validate files on repo" step now compares only
+  git-tracked files (via `git ls-files`, respecting `.gitignore`) instead of every
+  file on disk, eliminating false "missing" results for ignored files such as
+  `__pycache__/*.pyc`.
 
 ## v1.0.0
 
