@@ -58,7 +58,7 @@ import tkinter as tk
 from tkinter import ttk, filedialog, messagebox, scrolledtext
 
 APP_NAME = "GitHub PR Agent"
-APP_VERSION = "1.1.2"
+APP_VERSION = "1.2.0"
 CONFIG_DIR = Path(os.environ.get("LOCALAPPDATA", str(Path.home()))) / "GitHubPRAgent"
 CONFIG_FILE = CONFIG_DIR / "config.json"
 
@@ -157,40 +157,143 @@ class GitHubPRAgent:
             pass
         return {}
 
+    def _pr_config_dict(self) -> dict:
+        """All persisted fields for the Contribute-via-Pull-Request tab."""
+        return {
+            "upstream": self.upstream_var.get().strip(),
+            "clone_parent": self.clone_parent_var.get().strip(),
+            "clone_dir": self.gh_clone_dir,
+            "merge_mode": self.merge_mode.get(),
+            "source_path": self.source_var.get().strip(),
+            "target_rel": self.target_var.get().strip(),
+            "json_key": self.json_key_var.get().strip(),
+            "branch": self.branch_var.get().strip(),
+            "commit_msg": self.commit_var.get().strip(),
+            "run_type": self.run_type.get(),
+            "run_cmd": self.run_cmd_var.get().strip(),
+            "run_commands": self.run_commands,
+            "pr_title": self.pr_title_var.get().strip(),
+            "pr_body": self.pr_body.get("1.0", "end").strip(),
+        }
+
+    def _pub_config_dict(self) -> dict:
+        """All persisted fields for the Create-&-Publish-Repo tab."""
+        return {
+            "pub_name": self.pub_name_var.get().strip(),
+            "pub_desc": self.pub_desc_var.get().strip(),
+            "pub_private": bool(self.pub_private_var.get()),
+            "pub_source": self.pub_source_var.get().strip(),
+            "pub_branch": self.pub_branch_var.get().strip(),
+            "pub_commit": self.pub_commit_var.get().strip(),
+            "pub_scaffold": bool(self.pub_scaffold_var.get()),
+            "rel_enable": bool(self.rel_enable_var.get()),
+            "rel_win": bool(self.rel_win_var.get()),
+            "rel_fedora": bool(self.rel_fedora_var.get()),
+            "rel_debian": bool(self.rel_debian_var.get()),
+        }
+
     def save_config(self):
         """Persist all non-secret fields so past executions can be reused."""
         try:
             CONFIG_DIR.mkdir(parents=True, exist_ok=True)
-            data = {
-                "upstream": self.upstream_var.get().strip(),
-                "clone_parent": self.clone_parent_var.get().strip(),
-                "clone_dir": self.gh_clone_dir,
-                "merge_mode": self.merge_mode.get(),
-                "source_path": self.source_var.get().strip(),
-                "target_rel": self.target_var.get().strip(),
-                "json_key": self.json_key_var.get().strip(),
-                "branch": self.branch_var.get().strip(),
-                "commit_msg": self.commit_var.get().strip(),
-                "run_type": self.run_type.get(),
-                "run_cmd": self.run_cmd_var.get().strip(),
-                "run_commands": self.run_commands,
-                "pr_title": self.pr_title_var.get().strip(),
-                "pr_body": self.pr_body.get("1.0", "end").strip(),
-                "pub_name": self.pub_name_var.get().strip(),
-                "pub_desc": self.pub_desc_var.get().strip(),
-                "pub_private": bool(self.pub_private_var.get()),
-                "pub_source": self.pub_source_var.get().strip(),
-                "pub_branch": self.pub_branch_var.get().strip(),
-                "pub_commit": self.pub_commit_var.get().strip(),
-                "pub_scaffold": bool(self.pub_scaffold_var.get()),
-                "rel_enable": bool(self.rel_enable_var.get()),
-                "rel_win": bool(self.rel_win_var.get()),
-                "rel_fedora": bool(self.rel_fedora_var.get()),
-                "rel_debian": bool(self.rel_debian_var.get()),
-            }
+            data = {**self._pr_config_dict(), **self._pub_config_dict()}
             CONFIG_FILE.write_text(json.dumps(data, indent=2), encoding="utf-8")
         except Exception as e:
             self.log(f"Could not save config: {e}", "WARN")
+
+    # ===== per-tab config export / import ==================================
+    def _export_config(self, which):
+        """Save one tab's config (or both) to a user-chosen JSON file."""
+        if which == "pr":
+            data = {"_agent_config": "pr", "_version": APP_VERSION, **self._pr_config_dict()}
+            default = "pr_agent_pr_tab.json"
+        elif which == "pub":
+            data = {"_agent_config": "pub", "_version": APP_VERSION, **self._pub_config_dict()}
+            default = "pr_agent_create_tab.json"
+        else:
+            data = {"_agent_config": "all", "_version": APP_VERSION,
+                    **self._pr_config_dict(), **self._pub_config_dict()}
+            default = "pr_agent_config.json"
+        try:
+            CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+        except Exception:
+            pass
+        path = filedialog.asksaveasfilename(
+            title="Save configuration to file",
+            defaultextension=".json",
+            initialdir=str(CONFIG_DIR),
+            initialfile=default,
+            filetypes=[("JSON config", "*.json"), ("All files", "*.*")])
+        if not path:
+            return
+        try:
+            Path(path).write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
+            self.log(f"Saved {which} config \u2192 {path}", "OK")
+        except Exception as e:
+            self.alert("Save configuration", f"Could not save config: {e}", "error")
+
+    def _import_config(self, which):
+        """Load a tab's config (or both) from a user-chosen JSON file."""
+        path = filedialog.askopenfilename(
+            title="Load configuration from file",
+            initialdir=str(CONFIG_DIR),
+            filetypes=[("JSON config", "*.json"), ("All files", "*.*")])
+        if not path:
+            return
+        try:
+            data = json.loads(Path(path).read_text(encoding="utf-8"))
+            if not isinstance(data, dict):
+                raise ValueError("File is not a valid config object.")
+        except Exception as e:
+            self.alert("Load configuration", f"Could not read config: {e}", "error")
+            return
+        kind = data.get("_agent_config")
+        applied = []
+        if which in ("pr", "all") and kind in (None, "pr", "all"):
+            self._apply_pr_config(data); applied.append("Pull Request")
+        if which in ("pub", "all") and kind in (None, "pub", "all"):
+            self._apply_pub_config(data); applied.append("Create & Publish")
+        if not applied:
+            self.alert("Load configuration",
+                       f"This file is a '{kind}' config and doesn't match the requested tab.", "warn")
+            return
+        self.save_config()
+        self.log(f"Loaded config for: {', '.join(applied)} \u2190 {path}", "OK")
+
+    def _apply_pr_config(self, d):
+        if "upstream" in d: self.upstream_var.set(d.get("upstream", ""))
+        if "clone_parent" in d: self.clone_parent_var.set(d.get("clone_parent", ""))
+        if d.get("clone_dir"): self.gh_clone_dir = d.get("clone_dir", "")
+        if "merge_mode" in d: self.merge_mode.set(d.get("merge_mode", "copy"))
+        if "source_path" in d: self.source_var.set(d.get("source_path", ""))
+        if "target_rel" in d: self.target_var.set(d.get("target_rel", ""))
+        if "json_key" in d: self.json_key_var.set(d.get("json_key", ""))
+        if "branch" in d: self.branch_var.set(d.get("branch", ""))
+        if "commit_msg" in d: self.commit_var.set(d.get("commit_msg", ""))
+        if "run_type" in d: self.run_type.set(d.get("run_type", "powershell"))
+        if "run_cmd" in d: self.run_cmd_var.set(d.get("run_cmd", ""))
+        if isinstance(d.get("run_commands"), list):
+            self.run_commands = d["run_commands"]
+            self._refresh_saved_combo()
+        if "pr_title" in d: self.pr_title_var.set(d.get("pr_title", ""))
+        if "pr_body" in d:
+            self.pr_body.delete("1.0", "end")
+            self.pr_body.insert("1.0", d.get("pr_body", ""))
+        self._merge_mode_changed()
+
+    def _apply_pub_config(self, d):
+        if "pub_name" in d: self.pub_name_var.set(d.get("pub_name", ""))
+        if "pub_desc" in d: self.pub_desc_var.set(d.get("pub_desc", ""))
+        if "pub_private" in d: self.pub_private_var.set(bool(d.get("pub_private")))
+        if "pub_source" in d: self.pub_source_var.set(d.get("pub_source", ""))
+        if "pub_branch" in d: self.pub_branch_var.set(d.get("pub_branch", "main"))
+        if "pub_commit" in d: self.pub_commit_var.set(d.get("pub_commit", ""))
+        if "pub_scaffold" in d: self.pub_scaffold_var.set(bool(d.get("pub_scaffold")))
+        if "rel_enable" in d: self.rel_enable_var.set(bool(d.get("rel_enable")))
+        if "rel_win" in d: self.rel_win_var.set(bool(d.get("rel_win")))
+        if "rel_fedora" in d: self.rel_fedora_var.set(bool(d.get("rel_fedora")))
+        if "rel_debian" in d: self.rel_debian_var.set(bool(d.get("rel_debian")))
+        self._rel_toggle()
 
     # ===== UI ==============================================================
     def _build_ui(self):
@@ -217,6 +320,12 @@ class GitHubPRAgent:
         intro = ("Contribute to any GitHub repo via Pull Request. Complete the steps top to bottom. "
                  "Your token is kept in memory only; every other field is remembered for reuse.")
         ttk.Label(body, text=intro, wraplength=1120, justify="left").pack(anchor="w", padx=10, pady=(8, 4))
+        prbar = ttk.Frame(body); prbar.pack(fill="x", padx=10, pady=(0, 4))
+        ttk.Label(prbar, text="Tab config:").pack(side="left")
+        ttk.Button(prbar, text="\U0001f4be Save this tab\u2026",
+                   command=lambda: self._export_config("pr")).pack(side="left", padx=4)
+        ttk.Button(prbar, text="\U0001f4c2 Load config\u2026",
+                   command=lambda: self._import_config("pr")).pack(side="left", padx=4)
         self._build_step1(body)
         self._build_step2(body)
         self._build_step3(body)
@@ -406,6 +515,12 @@ class GitHubPRAgent:
                   text=("Create a brand-new GitHub repository, push a local folder to it, verify every file "
                         "landed on the repo, then open it in your browser. Progress streams to the terminal "
                         "below.")).pack(anchor="w", padx=10, pady=(8, 4))
+        pubbar = ttk.Frame(parent); pubbar.pack(fill="x", padx=10, pady=(0, 4))
+        ttk.Label(pubbar, text="Tab config:").pack(side="left")
+        ttk.Button(pubbar, text="\U0001f4be Save this tab\u2026",
+                   command=lambda: self._export_config("pub")).pack(side="left", padx=4)
+        ttk.Button(pubbar, text="\U0001f4c2 Load config\u2026",
+                   command=lambda: self._import_config("pub")).pack(side="left", padx=4)
 
         # Step 1 — Login
         s0 = ttk.LabelFrame(parent, text="Step 1 — Log in to GitHub")

@@ -64,6 +64,11 @@ Every field except the token is remembered between runs in
 The token is kept in memory only, never written to disk or `.git/config`, and
 redacted from all log output.
 
+In addition to that automatic global config, each tab has **💾 Save this tab…** and
+**📂 Load config…** buttons that export/import just that tab's fields to a JSON file
+you choose — handy for keeping several reusable setups and loading one to skip
+re-entering every step.
+
 ## Run from Python
 
 ```

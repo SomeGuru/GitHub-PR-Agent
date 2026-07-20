@@ -13,6 +13,14 @@ script when the remote is newer.
 additions, minor for features, major for breaking changes) and adds a dated entry
 here. Do not batch multiple change-sets under one version.
 
+## v1.2.0 — 2026-07-20
+
+- **Per-tab config export/import:** each tab now has **💾 Save this tab…** and
+  **📂 Load config…** buttons that write/read a user-chosen JSON file (in addition
+  to the automatic all-fields config at `%LOCALAPPDATA%\GitHubPRAgent\config.json`).
+  Saved files are tagged with their tab kind so loading applies the right fields;
+  loading a matching file repopulates every step to save re-entry time.
+
 ## v1.1.2 — 2026-07-20
 
 - **Accurate validation:** the "Validate files on repo" step now compares only
