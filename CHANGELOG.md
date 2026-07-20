@@ -13,6 +13,14 @@ script when the remote is newer.
 additions, minor for features, major for breaking changes) and adds a dated entry
 here. Do not batch multiple change-sets under one version.
 
+## v1.2.2 — 2026-07-20
+
+- **Fix CI build:** the release workflow (`.github/workflows/release.yml`)
+  pointed PyInstaller at a non-existent `src/main.py`, causing "Script file
+  'src/main.py' does not exist" and build exit code 1 on all three OS jobs. All
+  build steps now target the real entry point `GitHub_PR_Agent.py` at the repo
+  root.
+
 ## v1.2.1 — 2026-07-20
 
 - **Auto-restart after update:** applying an update now backs up the current

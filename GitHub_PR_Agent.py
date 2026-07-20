@@ -58,7 +58,7 @@ import tkinter as tk
 from tkinter import ttk, filedialog, messagebox, scrolledtext
 
 APP_NAME = "GitHub PR Agent"
-APP_VERSION = "1.2.1"
+APP_VERSION = "1.2.2"
 CONFIG_DIR = Path(os.environ.get("LOCALAPPDATA", str(Path.home()))) / "GitHubPRAgent"
 CONFIG_FILE = CONFIG_DIR / "config.json"
 
