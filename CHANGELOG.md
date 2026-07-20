@@ -1,0 +1,35 @@
+# Changelog
+
+All notable changes to **GitHub PR Agent** are recorded here. The version in
+`APP_VERSION` (top of `GitHub_PR_Agent.py`) is the source of truth and increments
+with every release. Newest entries go on top.
+
+The self-update feature ("Check for updates") compares this local `APP_VERSION`
+against `APP_VERSION` in the copy on the default branch of
+`https://github.com/someguru/GitHub-PR-Agent` and offers to replace the local
+script when the remote is newer.
+
+## v1.1.0
+
+- **Tab order swapped:** *Create & Publish Repo* is now the first tab; *Contribute
+  via Pull Request* is second.
+- **Release agent (Create tab):** new option to add a GitHub Actions workflow
+  (`.github/workflows/release.yml`) that builds and publishes release artifacts on
+  tag push, with selectable targets: **Windows 10/11**, **Linux Fedora**, and
+  **Linux Debian**.
+- **Default project files:** on push, missing `README.md`, `.gitignore`, and a
+  `src/` source folder are created automatically (opt-out checkbox).
+- **Self-update mechanism:** a *Check for updates* button downloads the latest
+  `GitHub_PR_Agent.py` from the update repo, backs up the current script, replaces
+  it, and prompts to restart.
+- **Version display:** the current version is shown next to the terminal buttons.
+
+## v1.0.0
+
+- Initial standalone, security-reviewed release.
+- Tab 1: 7-step *Contribute via Pull Request* workflow (connect, fork, clone,
+  merge files, commit/push, run locally, open PR).
+- Tab 2: *Create & Publish Repo* (login, create repo, push files, validate, open).
+- Zero runtime dependencies (Python stdlib + tkinter; bundled PortableGit).
+- Token kept in memory only; all other fields persisted to
+  `%LOCALAPPDATA%\GitHubPRAgent\config.json`.

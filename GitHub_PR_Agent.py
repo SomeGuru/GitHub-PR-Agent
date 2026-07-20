@@ -58,9 +58,19 @@ import tkinter as tk
 from tkinter import ttk, filedialog, messagebox, scrolledtext
 
 APP_NAME = "GitHub PR Agent"
-APP_VERSION = "1.0.0"
+APP_VERSION = "1.1.0"
 CONFIG_DIR = Path(os.environ.get("LOCALAPPDATA", str(Path.home()))) / "GitHubPRAgent"
 CONFIG_FILE = CONFIG_DIR / "config.json"
+
+# ---- self-update source ---------------------------------------------------
+# The agent can update itself by downloading the newest GitHub_PR_Agent.py from
+# the default branch of this repository and replacing the running script.
+UPDATE_REPO = "someguru/GitHub-PR-Agent"
+UPDATE_BRANCH = "main"
+UPDATE_SCRIPT_NAME = "GitHub_PR_Agent.py"
+UPDATE_RAW_URL = (
+    f"https://raw.githubusercontent.com/{UPDATE_REPO}/{UPDATE_BRANCH}/{UPDATE_SCRIPT_NAME}"
+)
 
 CREATE_NEW_CONSOLE = getattr(subprocess, "CREATE_NEW_CONSOLE", 0)
 # Prevent flashing consoles from headless git calls on Windows.
@@ -172,6 +182,11 @@ class GitHubPRAgent:
                 "pub_source": self.pub_source_var.get().strip(),
                 "pub_branch": self.pub_branch_var.get().strip(),
                 "pub_commit": self.pub_commit_var.get().strip(),
+                "pub_scaffold": bool(self.pub_scaffold_var.get()),
+                "rel_enable": bool(self.rel_enable_var.get()),
+                "rel_win": bool(self.rel_win_var.get()),
+                "rel_fedora": bool(self.rel_fedora_var.get()),
+                "rel_debian": bool(self.rel_debian_var.get()),
             }
             CONFIG_FILE.write_text(json.dumps(data, indent=2), encoding="utf-8")
         except Exception as e:
@@ -189,7 +204,13 @@ class GitHubPRAgent:
         nb = ttk.Notebook(paned)
         paned.add(nb, weight=3)
 
-        # ---- Tab 1: Contribute via Pull Request ----
+        # ---- Tab 1: Create & Publish Repo ----
+        pub_tab = ttk.Frame(nb)
+        nb.add(pub_tab, text="Create & Publish Repo")
+        pbody = self._scrollable(pub_tab)
+        self._build_publish_tab(pbody)
+
+        # ---- Tab 2: Contribute via Pull Request ----
         pr_tab = ttk.Frame(nb)
         nb.add(pr_tab, text="Contribute via Pull Request")
         body = self._scrollable(pr_tab)
@@ -204,12 +225,6 @@ class GitHubPRAgent:
         self._build_step6(body)
         self._build_step7(body)
 
-        # ---- Tab 2: Create & Publish Repo ----
-        pub_tab = ttk.Frame(nb)
-        nb.add(pub_tab, text="Create & Publish Repo")
-        pbody = self._scrollable(pub_tab)
-        self._build_publish_tab(pbody)
-
         # ---- bottom terminal ----
         term = ttk.LabelFrame(paned, text="GitHub Activity — terminal (captures all activity & errors)")
         paned.add(term, weight=1)
@@ -223,6 +238,8 @@ class GitHubPRAgent:
         btns.pack(fill="x", padx=4, pady=(0, 4))
         ttk.Button(btns, text="Clear log", command=lambda: self.console.delete("1.0", "end")).pack(side="left")
         ttk.Button(btns, text="Save config now", command=self.save_config).pack(side="left", padx=6)
+        ttk.Button(btns, text="\u2b73 Check for updates", command=self._check_for_updates).pack(side="left", padx=6)
+        ttk.Label(btns, text=f"v{APP_VERSION}", foreground="#888").pack(side="right", padx=6)
 
         self.root.protocol("WM_DELETE_WINDOW", self._on_close)
 
@@ -425,6 +442,31 @@ class GitHubPRAgent:
         ttk.Label(r1b, text="Description:").pack(side="left")
         self.pub_desc_var = tk.StringVar(value=self.cfg.get("pub_desc", ""))
         ttk.Entry(r1b, textvariable=self.pub_desc_var, width=72).pack(side="left", padx=6)
+
+        # Step 2b — Project scaffolding & release automation
+        sr = ttk.LabelFrame(parent, text="Step 2b — Project scaffolding & release automation")
+        sr.pack(fill="x", padx=10, pady=5)
+        sc = ttk.Frame(sr); sc.pack(fill="x", padx=6, pady=(6, 2))
+        self.pub_scaffold_var = tk.BooleanVar(value=self.cfg.get("pub_scaffold", True))
+        ttk.Checkbutton(sc, text="Create missing default files before push (README.md, .gitignore, src/ source folder)",
+                        variable=self.pub_scaffold_var).pack(side="left")
+        rr = ttk.Frame(sr); rr.pack(fill="x", padx=6, pady=(2, 2))
+        self.rel_enable_var = tk.BooleanVar(value=self.cfg.get("rel_enable", False))
+        ttk.Checkbutton(rr, text="Add a GitHub release agent (Actions workflow that builds & publishes releases on tag)",
+                        variable=self.rel_enable_var, command=self._rel_toggle).pack(side="left")
+        pr = ttk.Frame(sr); pr.pack(fill="x", padx=26, pady=(0, 6))
+        ttk.Label(pr, text="Target platforms:").pack(side="left")
+        self.rel_win_var = tk.BooleanVar(value=self.cfg.get("rel_win", True))
+        self.rel_fedora_var = tk.BooleanVar(value=self.cfg.get("rel_fedora", True))
+        self.rel_debian_var = tk.BooleanVar(value=self.cfg.get("rel_debian", True))
+        self._rel_checks = [
+            ttk.Checkbutton(pr, text="Windows 10/11", variable=self.rel_win_var),
+            ttk.Checkbutton(pr, text="Linux Fedora", variable=self.rel_fedora_var),
+            ttk.Checkbutton(pr, text="Linux Debian", variable=self.rel_debian_var),
+        ]
+        for c in self._rel_checks:
+            c.pack(side="left", padx=8)
+        self._rel_toggle()
 
         # Step 3 — Push files
         s2 = ttk.LabelFrame(parent, text="Step 3 — Push files to the repository")
@@ -1178,6 +1220,13 @@ class GitHubPRAgent:
 
             d = str(src)
             branch = self.pub_branch_var.get().strip() or "main"
+
+            # Create sensible defaults if the user opted in and they are absent.
+            if self.pub_scaffold_var.get():
+                self._scaffold_project_files(src)
+            if self.rel_enable_var.get():
+                self._write_release_workflow(src)
+
             if not (src / ".git").exists():
                 rc, _ = self._run_git(["-C", d, "init"])
                 if rc != 0:
@@ -1253,6 +1302,240 @@ class GitHubPRAgent:
     def _on_close(self):
         self.save_config()
         self.root.destroy()
+
+    # ===== project scaffolding =============================================
+    def _scaffold_project_files(self, src: Path):
+        """Create README.md, .gitignore and a src/ source folder if missing."""
+        created = []
+
+        readme = src / "README.md"
+        if not readme.exists():
+            name = self.pub_name_var.get().strip() or src.name
+            desc = self.pub_desc_var.get().strip() or "Project published with GitHub PR Agent."
+            readme.write_text(
+                f"# {name}\n\n{desc}\n\n"
+                "## Getting started\n\n"
+                "Source code lives in the `src/` folder.\n\n"
+                "## Build & release\n\n"
+                "Tag a commit as `vX.Y.Z` and push the tag to trigger the release workflow\n"
+                "(see `.github/workflows/release.yml`) if enabled.\n",
+                encoding="utf-8")
+            created.append("README.md")
+
+        gitignore = src / ".gitignore"
+        if not gitignore.exists():
+            gitignore.write_text(
+                "# Python\n__pycache__/\n*.py[cod]\n*.egg-info/\n.venv/\nvenv/\n"
+                "# Build output\nbuild/\ndist/\n*.spec.bak\n"
+                "# OS / editor\n.DS_Store\nThumbs.db\n.idea/\n.vscode/\n",
+                encoding="utf-8")
+            created.append(".gitignore")
+
+        src_dir = src / "src"
+        if not src_dir.exists():
+            src_dir.mkdir(parents=True, exist_ok=True)
+            keep = src_dir / ".gitkeep"
+            keep.write_text("", encoding="utf-8")
+            created.append("src/")
+
+        if created:
+            self.log("Scaffolded missing default files: " + ", ".join(created), "OK")
+        else:
+            self.log("Scaffolding: all default files already present.")
+
+    def _write_release_workflow(self, src: Path):
+        """Write .github/workflows/release.yml for the selected platforms."""
+        targets = []
+        if self.rel_win_var.get():
+            targets.append("windows")
+        if self.rel_fedora_var.get():
+            targets.append("fedora")
+        if self.rel_debian_var.get():
+            targets.append("debian")
+        if not targets:
+            self.log("Release agent enabled but no target platform selected; skipping workflow.",
+                     "WARN")
+            return
+
+        wf_dir = src / ".github" / "workflows"
+        wf_dir.mkdir(parents=True, exist_ok=True)
+        wf_file = wf_dir / "release.yml"
+        wf_file.write_text(self._render_release_workflow(targets), encoding="utf-8")
+        self.log(f"Wrote release workflow for [{', '.join(targets)}] \u2192 "
+                 ".github/workflows/release.yml", "OK")
+
+    @staticmethod
+    def _render_release_workflow(targets) -> str:
+        header = (
+            "name: Build & Release\n\n"
+            "# Builds standalone binaries and publishes them to a GitHub Release\n"
+            "# whenever a tag like v1.2.3 is pushed.\n"
+            "on:\n"
+            "  push:\n"
+            "    tags:\n"
+            "      - 'v*'\n"
+            "  workflow_dispatch:\n\n"
+            "permissions:\n"
+            "  contents: write\n\n"
+            "jobs:\n"
+        )
+
+        win_job = (
+            "  build-windows:\n"
+            "    name: Build (Windows 10/11)\n"
+            "    runs-on: windows-latest\n"
+            "    steps:\n"
+            "      - uses: actions/checkout@v4\n"
+            "      - uses: actions/setup-python@v5\n"
+            "        with:\n"
+            "          python-version: '3.12'\n"
+            "      - name: Install PyInstaller\n"
+            "        run: python -m pip install --upgrade pip pyinstaller\n"
+            "      - name: Build\n"
+            "        run: pyinstaller --noconfirm --windowed --name app --distpath dist src/main.py || pyinstaller --noconfirm --onefile --name app --distpath dist src/main.py\n"
+            "      - name: Package\n"
+            "        run: Compress-Archive -Path dist/* -DestinationPath app-windows.zip\n"
+            "      - uses: actions/upload-artifact@v4\n"
+            "        with:\n"
+            "          name: app-windows\n"
+            "          path: app-windows.zip\n"
+        )
+
+        def linux_job(distro, image, install):
+            return (
+                f"  build-{distro}:\n"
+                f"    name: Build (Linux {distro.capitalize()})\n"
+                "    runs-on: ubuntu-latest\n"
+                f"    container: {image}\n"
+                "    steps:\n"
+                "      - uses: actions/checkout@v4\n"
+                "      - name: Install build dependencies\n"
+                f"        run: {install}\n"
+                "      - name: Build\n"
+                f"        run: pyinstaller --noconfirm --onefile --name app-{distro} --distpath dist src/main.py\n"
+                "      - name: Package\n"
+                f"        run: tar -czf app-{distro}.tar.gz -C dist .\n"
+                "      - uses: actions/upload-artifact@v4\n"
+                "        with:\n"
+                f"          name: app-{distro}\n"
+                f"          path: app-{distro}.tar.gz\n"
+            )
+
+        fedora_job = linux_job(
+            "fedora", "fedora:latest",
+            "dnf -y install python3 python3-pip python3-tkinter binutils && "
+            "pip3 install --upgrade pyinstaller",
+        )
+        debian_job = linux_job(
+            "debian", "debian:latest",
+            "apt-get update && apt-get -y install python3 python3-pip python3-tk binutils && "
+            "pip3 install --break-system-packages --upgrade pyinstaller",
+        )
+
+        jobs = []
+        needs = []
+        if "windows" in targets:
+            jobs.append(win_job); needs.append("build-windows")
+        if "fedora" in targets:
+            jobs.append(fedora_job); needs.append("build-fedora")
+        if "debian" in targets:
+            jobs.append(debian_job); needs.append("build-debian")
+
+        needs_yaml = "".join(f"      - {n}\n" for n in needs)
+        release_job = (
+            "  release:\n"
+            "    name: Publish GitHub Release\n"
+            "    needs:\n"
+            f"{needs_yaml}"
+            "    runs-on: ubuntu-latest\n"
+            "    if: startsWith(github.ref, 'refs/tags/')\n"
+            "    steps:\n"
+            "      - uses: actions/download-artifact@v4\n"
+            "        with:\n"
+            "          path: artifacts\n"
+            "      - name: Publish release\n"
+            "        uses: softprops/action-gh-release@v2\n"
+            "        with:\n"
+            "          files: artifacts/**/*\n"
+        )
+
+        return header + "\n".join(jobs) + "\n" + release_job
+
+    def _rel_toggle(self):
+        state = "normal" if self.rel_enable_var.get() else "disabled"
+        for c in getattr(self, "_rel_checks", []):
+            c.configure(state=state)
+
+    # ===== self-update =====================================================
+    @staticmethod
+    def _parse_version(text):
+        m = re.search(r"APP_VERSION\s*=\s*[\"']([0-9]+(?:\.[0-9]+)*)[\"']", text or "")
+        return m.group(1) if m else None
+
+    @staticmethod
+    def _version_tuple(v):
+        try:
+            return tuple(int(x) for x in v.split("."))
+        except Exception:
+            return (0,)
+
+    def _check_for_updates(self):
+        def work():
+            self.log(f"Checking for updates from {UPDATE_REPO}\u2026")
+            req = urllib.request.Request(UPDATE_RAW_URL, method="GET")
+            req.add_header("User-Agent", "GitHub-PR-Agent")
+            req.add_header("Accept", "text/plain")
+            try:
+                with urllib.request.urlopen(req, timeout=30) as resp:
+                    remote_src = resp.read().decode("utf-8", "replace")
+            except urllib.error.HTTPError as e:
+                raise RuntimeError(
+                    f"Update check failed (HTTP {e.code}). The update repo "
+                    f"'{UPDATE_REPO}' or file '{UPDATE_SCRIPT_NAME}' may not exist yet.")
+            except urllib.error.URLError as e:
+                raise RuntimeError(f"Network error checking for updates: {e.reason}")
+
+            remote_ver = self._parse_version(remote_src)
+            if not remote_ver:
+                raise RuntimeError("Could not read the version of the remote script.")
+            self.log(f"Installed v{APP_VERSION}; latest v{remote_ver}.")
+
+            if self._version_tuple(remote_ver) <= self._version_tuple(APP_VERSION):
+                self.log("Already up to date.", "OK")
+                self.alert("Check for updates",
+                           f"You are on the latest version (v{APP_VERSION}).", "info")
+                return
+
+            self.root.after(0, lambda: self._prompt_apply_update(remote_src, remote_ver))
+        self._async(work, "Check for updates")
+
+    def _prompt_apply_update(self, remote_src, remote_ver):
+        if not messagebox.askyesno(
+                "Update available",
+                f"A newer version is available.\n\nInstalled: v{APP_VERSION}\n"
+                f"Latest: v{remote_ver}\n\nDownload and install it now? "
+                "The current script is backed up and the app must be restarted."):
+            return
+        self._async(lambda: self._apply_update(remote_src, remote_ver), "Apply update")
+
+    def _apply_update(self, remote_src, remote_ver):
+        if getattr(sys, "frozen", False):
+            raise RuntimeError(
+                "This is a packaged EXE build; self-update replaces the source script only. "
+                "Rebuild the EXE from the updated source, or run from Python to self-update.")
+        target = Path(__file__).resolve()
+        backup = target.with_suffix(f".py.bak-v{APP_VERSION}")
+        try:
+            shutil.copy2(target, backup)
+            self.log(f"Backed up current script \u2192 {backup.name}", "OK")
+            target.write_text(remote_src, encoding="utf-8")
+            self.log(f"Updated {target.name} to v{remote_ver}.", "OK")
+        except Exception as e:
+            raise RuntimeError(f"Could not write the update: {e}")
+        self.root.after(0, lambda: self.alert(
+            "Update installed",
+            f"Updated to v{remote_ver}. A backup was saved as {backup.name}.\n\n"
+            "Please close and restart GitHub PR Agent to run the new version.", "info"))
 
 
 def main():

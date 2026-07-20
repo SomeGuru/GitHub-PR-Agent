@@ -25,16 +25,39 @@ needs to be pre-installed on the end user's machine.
 The bottom **terminal** captures all activity and errors; any error also raises an
 OK alert dialog.
 
-## Second tab — Create & Publish Repo
+## Updates & versioning
 
-A separate tab publishes a local folder as a brand-new GitHub repo, streaming the
+- The current version (`APP_VERSION`) is shown next to the terminal buttons.
+- Click **⭳ Check for updates** to compare against the latest
+  `GitHub_PR_Agent.py` on the default branch of
+  `https://github.com/someguru/GitHub-PR-Agent`. If newer, the agent backs up the
+  current script (`GitHub_PR_Agent.py.bak-vX.Y.Z`), replaces it, and prompts you
+  to restart. (Self-update replaces the source script; rebuild the EXE afterward
+  when running the packaged build.)
+- Every release is recorded in [`CHANGELOG.md`](CHANGELOG.md) with an incrementing
+  version number.
+
+## First tab — Create & Publish Repo
+
+A tab that publishes a local folder as a brand-new GitHub repo, streaming the
 whole process to the same terminal:
 
 1. **Log in** — Personal Access Token (shares the connection with the PR tab).
 2. **Create repository** — name, description, Private toggle → creates it via the API (reuses if it already exists).
-3. **Push files** — Browse a local folder, set branch + commit message, *Push files* (init/commit/force-push).
-4. **Validate files on repo** — fetches the repo's file tree and confirms every local file (excluding `.git`) is present, listing any that are missing.
-5. **Open repo in browser**.
+3. **Project scaffolding & release automation** *(optional)*:
+   - **Create missing default files before push** — writes `README.md`,
+     `.gitignore`, and a `src/` source folder if they are absent.
+   - **Add a GitHub release agent** — writes `.github/workflows/release.yml`, a
+     GitHub Actions workflow that builds and publishes release artifacts when a
+     `v*` tag is pushed. Selectable targets: **Windows 10/11**, **Linux Fedora**,
+     **Linux Debian**.
+4. **Push files** — Browse a local folder, set branch + commit message, *Push files* (init/commit/force-push).
+5. **Validate files on repo** — fetches the repo's file tree and confirms every local file (excluding `.git`) is present, listing any that are missing.
+6. **Open repo in browser**.
+
+## Second tab — Contribute via Pull Request
+
+The 7-step flow below drives a Pull Request against any repository.
 
 Every field except the token is remembered between runs in
 `%LOCALAPPDATA%\GitHubPRAgent\config.json` so steps can be reused for re-execution.

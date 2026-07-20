@@ -1,0 +1,83 @@
+name: Build & Release
+
+# Builds standalone binaries and publishes them to a GitHub Release
+# whenever a tag like v1.2.3 is pushed.
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-windows:
+    name: Build (Windows 10/11)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install PyInstaller
+        run: python -m pip install --upgrade pip pyinstaller
+      - name: Build
+        run: pyinstaller --noconfirm --windowed --name app --distpath dist src/main.py || pyinstaller --noconfirm --onefile --name app --distpath dist src/main.py
+      - name: Package
+        run: Compress-Archive -Path dist/* -DestinationPath app-windows.zip
+      - uses: actions/upload-artifact@v4
+        with:
+          name: app-windows
+          path: app-windows.zip
+
+  build-fedora:
+    name: Build (Linux Fedora)
+    runs-on: ubuntu-latest
+    container: fedora:latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install build dependencies
+        run: dnf -y install python3 python3-pip python3-tkinter binutils && pip3 install --upgrade pyinstaller
+      - name: Build
+        run: pyinstaller --noconfirm --onefile --name app-fedora --distpath dist src/main.py
+      - name: Package
+        run: tar -czf app-fedora.tar.gz -C dist .
+      - uses: actions/upload-artifact@v4
+        with:
+          name: app-fedora
+          path: app-fedora.tar.gz
+
+  build-debian:
+    name: Build (Linux Debian)
+    runs-on: ubuntu-latest
+    container: debian:latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install build dependencies
+        run: apt-get update && apt-get -y install python3 python3-pip python3-tk binutils && pip3 install --break-system-packages --upgrade pyinstaller
+      - name: Build
+        run: pyinstaller --noconfirm --onefile --name app-debian --distpath dist src/main.py
+      - name: Package
+        run: tar -czf app-debian.tar.gz -C dist .
+      - uses: actions/upload-artifact@v4
+        with:
+          name: app-debian
+          path: app-debian.tar.gz
+
+  release:
+    name: Publish GitHub Release
+    needs:
+      - build-windows
+      - build-fedora
+      - build-debian
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/')
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+      - name: Publish release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: artifacts/**/*
