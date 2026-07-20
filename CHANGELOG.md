@@ -9,7 +9,27 @@ against `APP_VERSION` in the copy on the default branch of
 `https://github.com/someguru/GitHub-PR-Agent` and offers to replace the local
 script when the remote is newer.
 
-## v1.1.0
+**Process:** every change-set bumps `APP_VERSION` (patch for fixes/small
+additions, minor for features, major for breaking changes) and adds a dated entry
+here. Do not batch multiple change-sets under one version.
+
+## v1.1.2 — 2026-07-20
+
+- **Accurate validation:** the "Validate files on repo" step now compares only
+  git-tracked files (via `git ls-files`, respecting `.gitignore`) instead of every
+  file on disk, eliminating false "missing" results for ignored files such as
+  `__pycache__/*.pyc`.
+- **Scaffolded `.gitignore`** now also ignores `vendor/` (bundled tooling) so
+  new repos don't publish PortableGit / build output.
+
+## v1.1.1 — 2026-07-20
+
+- **Workflow-scope guard:** when the release agent is enabled, the push is blocked
+  early with a clear message if the token lacks the `workflow` scope, and a remote
+  rejection for the same reason is translated into actionable guidance.
+- **UI hint** under the release checkboxes noting the `workflow` scope requirement.
+
+## v1.1.0 — 2026-07-20
 
 - **Tab order swapped:** *Create & Publish Repo* is now the first tab; *Contribute
   via Pull Request* is second.
@@ -23,13 +43,6 @@ script when the remote is newer.
   `GitHub_PR_Agent.py` from the update repo, backs up the current script, replaces
   it, and prompts to restart.
 - **Version display:** the current version is shown next to the terminal buttons.
-- **Workflow-scope guard:** when the release agent is enabled, the push is blocked
-  early with a clear message if the token lacks the `workflow` scope, and a remote
-  rejection for the same reason is translated into actionable guidance.
-- **Accurate validation:** the "Validate files on repo" step now compares only
-  git-tracked files (via `git ls-files`, respecting `.gitignore`) instead of every
-  file on disk, eliminating false "missing" results for ignored files such as
-  `__pycache__/*.pyc`.
 
 ## v1.0.0
 
