@@ -6,12 +6,30 @@ with every release. Newest entries go on top.
 
 The self-update feature ("Check for updates") compares this local `APP_VERSION`
 against `APP_VERSION` in the copy on the default branch of
-`https://github.com/someguru/GitHub-PR-Agent` and offers to replace the local
+`https://github.com/SomeGuru/GitHub-PR-Agent` and offers to replace the local
 script when the remote is newer.
 
 **Process:** every change-set bumps `APP_VERSION` (patch for fixes/small
 additions, minor for features, major for breaking changes) and adds a dated entry
 here. Do not batch multiple change-sets under one version.
+
+## v1.4.2 — 2026-07-21
+
+- **Point self-update at the real repo:** `UPDATE_REPO` is now
+  `SomeGuru/GitHub-PR-Agent` (was the `someguru` placeholder casing), so "Check
+  for updates" fetches the actual published `GitHub_PR_Agent.py`. Updated the
+  matching URLs in README and this changelog.
+
+## v1.4.1 — 2026-07-21
+
+- **Fix self-update "Could not write the update: [WinError 2]":** the updater
+  assumed `__file__` always pointed at an existing file, so `shutil.copy2` of the
+  backup aborted the whole update when the running script path couldn't be
+  resolved (odd launch method / moved or cloud-placeholder copy). The updater now
+  resolves the running script robustly (tries `__file__`, `sys.argv[0]`, then the
+  app base dir), treats the pre-update backup as non-fatal (logs a warning and
+  continues), reports the actual target path in any write error, and falls back
+  to a `pythonw`/`python` interpreter for the auto-restart.
 
 ## v1.4.0 — 2026-07-21
 

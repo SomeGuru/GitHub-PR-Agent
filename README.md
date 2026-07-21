@@ -30,7 +30,7 @@ OK alert dialog.
 - The current version (`APP_VERSION`) is shown next to the terminal buttons.
 - Click **⭳ Check for updates** to compare against the latest
   `GitHub_PR_Agent.py` on the default branch of
-  `https://github.com/someguru/GitHub-PR-Agent`. If newer, the agent backs up the
+  `https://github.com/SomeGuru/GitHub-PR-Agent`. If newer, the agent backs up the
   current script (`GitHub_PR_Agent.py.bak-vX.Y.Z`), replaces it, then
   automatically closes the current window and launches the updated version.
   (Self-update replaces the source script; rebuild the EXE afterward when running

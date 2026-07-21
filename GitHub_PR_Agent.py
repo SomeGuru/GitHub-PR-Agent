@@ -72,7 +72,7 @@ import tkinter as tk
 from tkinter import ttk, filedialog, messagebox, scrolledtext
 
 APP_NAME = "GitHub PR Agent"
-APP_VERSION = "1.4.0"
+APP_VERSION = "1.4.2"
 CONFIG_DIR = Path(os.environ.get("LOCALAPPDATA", str(Path.home()))) / "GitHubPRAgent"
 CONFIG_FILE = CONFIG_DIR / "config.json"
 
@@ -89,7 +89,7 @@ VAULT_KDF_ITERATIONS = 200_000
 # ---- self-update source ---------------------------------------------------
 # The agent can update itself by downloading the newest GitHub_PR_Agent.py from
 # the default branch of this repository and replacing the running script.
-UPDATE_REPO = "someguru/GitHub-PR-Agent"
+UPDATE_REPO = "SomeGuru/GitHub-PR-Agent"
 UPDATE_BRANCH = "main"
 UPDATE_SCRIPT_NAME = "GitHub_PR_Agent.py"
 UPDATE_RAW_URL = (
@@ -2099,29 +2099,66 @@ class GitHubPRAgent:
             return
         self._async(lambda: self._apply_update(remote_src, remote_ver), "Apply update")
 
+    def _resolve_self_path(self) -> Path:
+        """Best-effort absolute path of the running .py script, tolerant of odd
+        launch methods (pythonw, moved cwd, argv[0])."""
+        candidates = []
+        for getter in (lambda: Path(__file__).resolve(),
+                       lambda: Path(sys.argv[0]).resolve() if sys.argv and sys.argv[0] else None,
+                       lambda: app_base_dir() / UPDATE_SCRIPT_NAME):
+            try:
+                p = getter()
+            except Exception:
+                p = None
+            if p is not None and p not in candidates:
+                candidates.append(p)
+        for p in candidates:
+            try:
+                if p.exists():
+                    return p
+            except Exception:
+                pass
+        return candidates[0] if candidates else Path(__file__)
+
     def _apply_update(self, remote_src, remote_ver):
         if getattr(sys, "frozen", False):
             raise RuntimeError(
                 "This is a packaged EXE build; self-update replaces the source script only. "
                 "Rebuild the EXE from the updated source, or run from Python to self-update.")
-        target = Path(__file__).resolve()
+        target = self._resolve_self_path()
+        if not target.exists():
+            raise RuntimeError(
+                f"Could not locate the running script to update (looked at: {target}). "
+                "If you launched from a moved, renamed, or cloud-placeholder copy, restart the "
+                "app from the installed GitHub_PR_Agent.py and try again.")
+        try:
+            target.parent.mkdir(parents=True, exist_ok=True)
+        except Exception:
+            pass
         backup = target.with_suffix(f".py.bak-v{APP_VERSION}")
+        # The backup is a safety convenience — never let it abort the update.
         try:
             shutil.copy2(target, backup)
             self.log(f"Backed up current script \u2192 {backup.name}", "OK")
+        except Exception as e:
+            backup = None
+            self.log(f"Could not back up current script (continuing anyway): {e}", "WARN")
+        try:
             target.write_text(remote_src, encoding="utf-8")
             self.log(f"Updated {target.name} to v{remote_ver}.", "OK")
         except Exception as e:
-            raise RuntimeError(f"Could not write the update: {e}")
-        self.root.after(0, lambda: self._restart_into_new_version(target, remote_ver, backup.name))
+            raise RuntimeError(f"Could not write the update to {target}: {e}")
+        backup_name = backup.name if backup else "none"
+        self.root.after(0, lambda: self._restart_into_new_version(target, remote_ver, backup_name))
 
     def _restart_into_new_version(self, target, remote_ver, backup_name):
         """Persist config, launch the updated script detached, and close this app."""
         self.save_config()
         self.log(f"Restarting into v{remote_ver} \u2026", "OK")
+        py = sys.executable or shutil.which("pythonw") or shutil.which("python") or "python"
         try:
             flags = DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP
-            subprocess.Popen([sys.executable, str(target)],
+            subprocess.Popen([py, str(target)],
                              cwd=str(target.parent),
                              creationflags=flags, close_fds=True)
         except Exception as e:
