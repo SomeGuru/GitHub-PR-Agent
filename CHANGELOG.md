@@ -13,6 +13,16 @@ script when the remote is newer.
 additions, minor for features, major for breaking changes) and adds a dated entry
 here. Do not batch multiple change-sets under one version.
 
+## v1.4.3 — 2026-07-21
+
+- **Re-fix the release workflow entry point:** `.github/workflows/release.yml`
+  had reverted to the non-existent `src/main.py` (so every OS build failed with
+  "Script file 'src/main.py' does not exist"). All three build jobs point at
+  `GitHub_PR_Agent.py` again. IMPORTANT: this fix only helps once it is pushed to
+  the repo's `main` — pushing files under `.github/workflows/` requires a PAT
+  with the **`workflow`** scope (in addition to `repo`); otherwise GitHub rejects
+  the workflow change and the stale `src/main.py` workflow keeps running.
+
 ## v1.4.2 — 2026-07-21
 
 - **Point self-update at the real repo:** `UPDATE_REPO` is now
