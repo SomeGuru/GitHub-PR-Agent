@@ -13,6 +13,19 @@ script when the remote is newer.
 additions, minor for features, major for breaking changes) and adds a dated entry
 here. Do not batch multiple change-sets under one version.
 
+## v1.3.1 — 2026-07-20
+
+- **"Save Activity Window" button:** the bottom-bar "Save config now" button is
+  replaced by "💾 Save Activity Window", which copies the activity terminal to
+  the clipboard and saves it to a user-chosen `.txt` file.
+- **PAT Vault moved up top:** the vault button now sits next to "Load config…"
+  in each tab's top toolbar (removed from the bottom bar and the Step 1 rows).
+- **Single master login + Fill button:** the vault dialog is streamlined to one
+  master passphrase. Unlocking (or saving) enables a dedicated "⬇ Fill Step 1
+  PAT" button that pushes the stored token into Step 1; the button stays
+  disabled until the correct master passphrase is entered. The reset passphrase
+  `MikeLariosWasHere!` still wipes the vault.
+
 ## v1.3.0 — 2026-07-20
 
 - **PAT vault (encrypted at rest):** new "🔐 Vault" button (both Step 1 rows and
