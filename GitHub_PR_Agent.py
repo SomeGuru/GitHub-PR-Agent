@@ -72,7 +72,7 @@ import tkinter as tk
 from tkinter import ttk, filedialog, messagebox, scrolledtext
 
 APP_NAME = "GitHub PR Agent"
-APP_VERSION = "1.3.1"
+APP_VERSION = "1.4.0"
 CONFIG_DIR = Path(os.environ.get("LOCALAPPDATA", str(Path.home()))) / "GitHubPRAgent"
 CONFIG_FILE = CONFIG_DIR / "config.json"
 
@@ -231,6 +231,7 @@ class GitHubPRAgent:
         # ---- persisted configuration ----
         self.cfg = self._load_config()
         self.run_commands = self.cfg.get("run_commands", [])
+        self.build_repo = self.cfg.get("build_repo", "")
 
         self._build_ui()
         self._install_excepthook()
@@ -279,6 +280,7 @@ class GitHubPRAgent:
             "rel_win": bool(self.rel_win_var.get()),
             "rel_fedora": bool(self.rel_fedora_var.get()),
             "rel_debian": bool(self.rel_debian_var.get()),
+            "build_repo": getattr(self, "build_repo", ""),
         }
 
     def save_config(self):
@@ -382,6 +384,7 @@ class GitHubPRAgent:
         if "rel_win" in d: self.rel_win_var.set(bool(d.get("rel_win")))
         if "rel_fedora" in d: self.rel_fedora_var.set(bool(d.get("rel_fedora")))
         if "rel_debian" in d: self.rel_debian_var.set(bool(d.get("rel_debian")))
+        if "build_repo" in d: self.build_repo = d.get("build_repo", "")
         self._rel_toggle()
 
     # ===== UI ==============================================================
@@ -439,6 +442,8 @@ class GitHubPRAgent:
         ttk.Button(btns, text="Clear log", command=lambda: self.console.delete("1.0", "end")).pack(side="left")
         ttk.Button(btns, text="\U0001f4be Save Activity Window",
                    command=self._save_activity_window).pack(side="left", padx=6)
+        ttk.Button(btns, text="\U0001f3d7 Build",
+                   command=self.open_build_release).pack(side="left", padx=6)
         ttk.Button(btns, text="\u2b73 Check for updates", command=self._check_for_updates).pack(side="left", padx=6)
         ttk.Label(btns, text=f"v{APP_VERSION}", foreground="#888").pack(side="right", padx=6)
 
@@ -1523,6 +1528,132 @@ class GitHubPRAgent:
                 self.alert("Save Activity Window", f"Could not save file: {e}", "error")
         elif copied:
             self.log("Activity window copied to clipboard.", "OK")
+
+    # ===== Build release (push a version tag → run Actions) ===============
+    def open_build_release(self):
+        """Dialog that pushes tag v{APP_VERSION} to a repo to trigger the
+        release workflow that builds the executables."""
+        tag = f"v{APP_VERSION}"
+        win = tk.Toplevel(self.root)
+        win.title("\U0001f3d7 Build Release")
+        win.transient(self.root)
+        win.resizable(False, False)
+        win.grab_set()
+
+        ttk.Label(win, wraplength=560, justify="left", foreground="#444",
+                  text=(f"This pushes the tag \u201c{tag}\u201d (from APP_VERSION) to your GitHub "
+                        "repository. That tag push triggers the release workflow "
+                        "(.github/workflows/release.yml), which builds the Windows, Fedora and "
+                        "Debian executables and publishes them to a GitHub Release.\n\n"
+                        "You must be connected in Step 1 with a token that has 'repo' scope on "
+                        "the target repository.")
+                  ).pack(anchor="w", padx=12, pady=(12, 6))
+
+        form = ttk.Frame(win); form.pack(fill="x", padx=12, pady=2)
+        ttk.Label(form, text="Target repo (owner/repo):", width=22).grid(row=0, column=0, sticky="w", pady=3)
+        repo_var = tk.StringVar(value=self.build_repo or "")
+        repo_entry = ttk.Entry(form, textvariable=repo_var, width=40, font=("Consolas", 9))
+        repo_entry.grid(row=0, column=1, sticky="w", padx=4, pady=3)
+
+        ttk.Label(form, text="Branch to tag:", width=22).grid(row=1, column=0, sticky="w", pady=3)
+        branch_var = tk.StringVar(value="")
+        ttk.Entry(form, textvariable=branch_var, width=24).grid(row=1, column=1, sticky="w", padx=4, pady=3)
+        ttk.Label(form, text="(blank = repo default branch)", foreground="#888").grid(
+            row=1, column=2, sticky="w")
+
+        ttk.Label(form, text="Tag to push:", width=22).grid(row=2, column=0, sticky="w", pady=3)
+        ttk.Label(form, text=tag, font=("Consolas", 10, "bold"),
+                  foreground="#060").grid(row=2, column=1, sticky="w", padx=4, pady=3)
+
+        recreate_var = tk.BooleanVar(value=False)
+        ttk.Checkbutton(win, text=f"Recreate the tag if \u201c{tag}\u201d already exists "
+                                  "(re-runs the build)", variable=recreate_var).pack(
+            anchor="w", padx=12, pady=(2, 4))
+
+        foot = ttk.Frame(win); foot.pack(fill="x", padx=12, pady=(4, 12))
+
+        def do_build():
+            repo_full = repo_var.get().strip()
+            if not self.gh_user:
+                self.alert("Build Release", "Connect to GitHub in Step 1 first.", "warn")
+                return
+            if repo_full.count("/") != 1 or not all(repo_full.split("/")):
+                self.alert("Build Release", "Enter the target repository as owner/repo "
+                                            "(e.g. myname/GitHub-PR-Agent).", "warn")
+                return
+            branch = branch_var.get().strip()
+            recreate = recreate_var.get()
+            win.destroy()
+            self._async(lambda: self._push_build_tag(repo_full, branch, recreate), "Build Release")
+
+        ttk.Button(foot, text=f"\U0001f3d7 Build (push {tag} & run Actions)",
+                   command=do_build).pack(side="left")
+        ttk.Button(foot, text="Close", command=win.destroy).pack(side="right")
+
+        repo_entry.focus_set()
+        win.update_idletasks()
+        try:
+            x = self.root.winfo_rootx() + 60
+            y = self.root.winfo_rooty() + 60
+            win.geometry(f"+{x}+{y}")
+        except Exception:
+            pass
+
+    def _push_build_tag(self, repo_full, branch, recreate):
+        if not self.gh_user:
+            raise RuntimeError("Connect first (Step 1).")
+        owner, repo = repo_full.split("/", 1)
+        tag = f"v{APP_VERSION}"
+        self.log(f"Preparing release build: tag {tag} \u2192 {owner}/{repo} \u2026")
+
+        if not branch:
+            _, info = self._api("GET", f"/repos/{owner}/{repo}")
+            branch = info.get("default_branch", "main")
+            self.log(f"Using default branch '{branch}'.")
+
+        try:
+            _, ref = self._api("GET", f"/repos/{owner}/{repo}/git/ref/heads/{branch}")
+        except RuntimeError as e:
+            if "404" in str(e):
+                raise RuntimeError(f"Branch '{branch}' not found on {owner}/{repo}. Check the "
+                                   "repo/branch, or that your token can see it.")
+            raise
+        sha = ref["object"]["sha"]
+
+        exists = False
+        try:
+            self._api("GET", f"/repos/{owner}/{repo}/git/ref/tags/{tag}")
+            exists = True
+        except RuntimeError as e:
+            if "404" not in str(e):
+                raise
+
+        if exists:
+            if not recreate:
+                raise RuntimeError(
+                    f"Tag {tag} already exists on {owner}/{repo}. Bump APP_VERSION for a new "
+                    "release, or re-open Build and tick 'Recreate the tag' to re-run the build.")
+            self._api("DELETE", f"/repos/{owner}/{repo}/git/refs/tags/{tag}")
+            self.log(f"Deleted existing tag {tag} to re-trigger the build.", "WARN")
+            time.sleep(1)
+
+        self._api("POST", f"/repos/{owner}/{repo}/git/refs",
+                  {"ref": f"refs/tags/{tag}", "sha": sha})
+        self.log(f"Pushed tag {tag} \u2192 {owner}/{repo}@{sha[:7]}. Release build started.", "OK")
+
+        self.build_repo = repo_full
+        self.save_config()
+
+        actions_url = f"https://github.com/{owner}/{repo}/actions"
+        self.log(f"Track the build here: {actions_url}")
+
+        def prompt_open():
+            if messagebox.askyesno("Build Release",
+                                   f"Tag {tag} pushed to {owner}/{repo}.\n\n"
+                                   "The Actions build is now running. Open the Actions page "
+                                   "in your browser to watch it?"):
+                webbrowser.open(actions_url)
+        self.root.after(0, prompt_open)
 
 
     def _pub_create_repo(self):

@@ -13,6 +13,21 @@ script when the remote is newer.
 additions, minor for features, major for breaking changes) and adds a dated entry
 here. Do not batch multiple change-sets under one version.
 
+## v1.4.0 — 2026-07-21
+
+- **"🏗 Build" button (one-click release):** new bottom-bar button opens a Build
+  Release dialog that pushes the tag `v{APP_VERSION}` to a target `owner/repo`
+  via the GitHub REST API, which triggers `.github/workflows/release.yml` to
+  build the Windows/Fedora/Debian executables and publish a GitHub Release — no
+  local git clone or manual `git tag` needed. Resolves the repo's default branch
+  automatically, remembers the target repo (`build_repo` in config), detects an
+  existing tag (with an opt-in "Recreate the tag" checkbox to re-run the build),
+  and offers to open the Actions page afterward. Requires a Step 1 connection
+  with 'repo' scope.
+  - Note: creating the tag ref through the API with a user PAT *does* trigger the
+    tag-push workflow (unlike Actions' own `GITHUB_TOKEN`). Tags/commit messages
+    alone never trigger it — only a real pushed tag does.
+
 ## v1.3.1 — 2026-07-20
 
 - **"Save Activity Window" button:** the bottom-bar "Save config now" button is
