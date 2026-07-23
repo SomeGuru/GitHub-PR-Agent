@@ -2,6 +2,17 @@
 
 All notable changes to GitHub PR Agent are documented here. Newest entries on top.
 
+## v2.1.2 - 2026-07-23
+
+### Fixed
+- **Debian release build still hit PEP 668 `externally-managed-environment`.** Hardened
+  the generated Debian job with a job-level `PIP_BREAK_SYSTEM_PACKAGES: "1"` environment
+  variable, so every `pip3` call in the container (requirements and pyinstaller) is
+  covered even if an inline flag is missed. Regenerated `build.yml`.
+- Note: this failure recurs whenever GitHub runs an **older** copy of the workflow. The
+  fixed `build.yml` must be pushed to `main` and the tag must point at a commit that
+  contains it (tag builds use the workflow from the tagged commit).
+
 ## v2.1.1 - 2026-07-23
 
 ### Fixed
