@@ -2,6 +2,19 @@
 
 All notable changes to GitHub PR Agent are documented here. Newest entries on top.
 
+## v2.2.1 - 2026-07-23
+
+### Fixed
+- **"Publish GitHub Release" step failed** after successful builds. Hardened the generated
+  release job: added job-level `permissions: contents: write`, an explicit
+  `token: ${{ secrets.GITHUB_TOKEN }}`, `tag_name: ${{ github.ref_name }}`,
+  `fail_on_unmatched_files: false`, and `generate_release_notes: true`. Regenerated
+  `build.yml`.
+- Reminder: if the release step still returns 403 "Resource not accessible by
+  integration", set the repo's **Settings > Actions > General > Workflow permissions** to
+  **Read and write permissions**. That repo setting caps the token and cannot be set from
+  the app or the workflow file.
+
 ## v2.2.0 - 2026-07-23
 
 ### Added

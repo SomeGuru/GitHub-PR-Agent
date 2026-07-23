@@ -56,7 +56,7 @@ if sys.stderr is None:
     sys.stderr = open(os.devnull, "w", encoding="utf-8")
 
 APP_NAME = "GitHub PR Agent"
-APP_VERSION = "2.2.0"
+APP_VERSION = "2.2.1"
 UPDATE_REPO = "SomeGuru/GitHub-PR-Agent"
 UPDATE_BRANCH = "main"
 UPDATE_SCRIPT_NAME = "GitHub_PR_Agent.py"
@@ -705,6 +705,8 @@ def render_workflow(build_type: str, branch: str, output_mode: str, py_entry: st
             "    needs:\n"
             f"{yaml_list(needs)}\n"
             "    runs-on: ubuntu-latest\n"
+            "    permissions:\n"
+            "      contents: write\n"
             "    steps:\n"
             "      - uses: actions/download-artifact@v4\n"
             "        with:\n"
@@ -712,7 +714,11 @@ def render_workflow(build_type: str, branch: str, output_mode: str, py_entry: st
             "      - name: Publish release\n"
             "        uses: softprops/action-gh-release@v2\n"
             "        with:\n"
+            "          tag_name: ${{ github.ref_name }}\n"
             "          files: artifacts/**/*\n"
+            "          fail_on_unmatched_files: false\n"
+            "          generate_release_notes: true\n"
+            "          token: ${{ secrets.GITHUB_TOKEN }}\n"
         )
 
     return header + "\n".join(jobs) + release_job + "\n"
