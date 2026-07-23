@@ -1,0 +1,5 @@
+# GitHub PR Agent runs on the Python standard library only (tkinter included).
+# No third-party packages are required at runtime.
+#
+# Building executables uses PyInstaller, which the GitHub Actions workflow installs
+# on demand. It is intentionally not pinned here so the runtime stays dependency-free.

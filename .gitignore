@@ -1,0 +1,21 @@
+# Build output
+dist/
+build/
+*.spec.bak
+
+# PyInstaller work dir
+__pycache__/
+*.pyc
+
+# Local app data and backups
+*.bak
+*.bak-*
+config.json
+vault.json
+
+# Vendored Git (do not commit the portable toolchain)
+vendor/
+
+# OS noise
+Thumbs.db
+.DS_Store
