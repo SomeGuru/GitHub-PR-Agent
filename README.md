@@ -45,7 +45,10 @@ pyinstaller --noconfirm GitHub_PR_Agent.spec
 ```
 
 The bundled GitHub Actions workflow (`.github/workflows/build.yml`) builds Windows,
-Fedora, and Debian binaries and, on a `v*` tag, publishes them to a GitHub Release.
+Fedora, and Debian executables and, on a `v*` tag, publishes them to a GitHub Release.
+Assets are single files named after the repository (e.g. `GitHub-PR-Agent.exe`,
+`GitHub-PR-Agent-fedora`, `GitHub-PR-Agent-debian`) so users download and run them
+directly — no unzip step.
 
 ## Releasing
 
