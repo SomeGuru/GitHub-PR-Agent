@@ -2,6 +2,15 @@
 
 All notable changes to GitHub PR Agent are documented here. Newest entries on top.
 
+## v2.2.0 - 2026-07-23
+
+### Added
+- **⬆ Push main button** in the activity bar. Force-pushes the selected local folder
+  (including `.github/workflows`) to the target repo's `main` branch so `main` always has
+  the latest workflow. It preflights `repo` scope and, when a workflow is present,
+  `workflow` scope, then reminds you that updating the version tag via **Build** re-runs
+  the build (tag builds use the workflow from the tagged commit).
+
 ## v2.1.2 - 2026-07-23
 
 ### Fixed

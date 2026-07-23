@@ -50,10 +50,11 @@ Fedora, and Debian binaries and, on a `v*` tag, publishes them to a GitHub Relea
 ## Releasing
 
 1. Bump `APP_VERSION` and add a `CHANGELOG.md` entry.
-2. Commit and push to `main`.
+2. Click **⬆ Push main** (or `git push origin main`) so `main` has the latest workflow.
 3. Click **Build** in the app (or push a `v{APP_VERSION}` tag) to trigger Actions.
 
-Tags must match `v*` for the release job to run.
+Tags must match `v*` for the release job to run. Tag builds use the workflow from the
+tagged commit, so always push `main` before tagging.
 
 ## Reliability notes
 

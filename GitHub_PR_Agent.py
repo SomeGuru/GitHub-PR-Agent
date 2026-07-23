@@ -56,7 +56,7 @@ if sys.stderr is None:
     sys.stderr = open(os.devnull, "w", encoding="utf-8")
 
 APP_NAME = "GitHub PR Agent"
-APP_VERSION = "2.1.2"
+APP_VERSION = "2.2.0"
 UPDATE_REPO = "SomeGuru/GitHub-PR-Agent"
 UPDATE_BRANCH = "main"
 UPDATE_SCRIPT_NAME = "GitHub_PR_Agent.py"
@@ -883,6 +883,7 @@ class GitHubPRAgent:
         btns.pack(fill="x", padx=4, pady=(0, 4))
         ttk.Button(btns, text="Clear log", command=lambda: self.console.delete("1.0", "end")).pack(side="left")
         ttk.Button(btns, text="Save Activity Window", command=self._save_activity_window).pack(side="left", padx=6)
+        ttk.Button(btns, text="⬆ Push main", command=self._push_main).pack(side="left", padx=6)
         ttk.Button(btns, text="Build", command=self.open_build_release, style="Accent.TButton").pack(side="left", padx=6)
         ttk.Button(btns, text="🔒 PAT Vault", command=self.open_vault).pack(side="left", padx=6)
         ttk.Button(btns, text="⬭ Check for updates", command=self._check_for_updates).pack(side="left", padx=6)
@@ -1349,6 +1350,39 @@ class GitHubPRAgent:
         if not cleaned:
             return "(no git output captured)"
         return "\n".join(cleaned[-lines:])
+
+    def _push_main(self):
+        """Force-push the selected local folder (including any .github/workflows) to the
+        target repo's main branch, so main always has the latest workflow. After this,
+        updating the version tag with the Build button re-runs the build."""
+        def work():
+            if not self.gh_user:
+                raise RuntimeError("Connect first.")
+            self._ensure_git()
+            repo_full = (self.build_repo or self.pub_repo_full or "").strip()
+            if repo_full.count("/") != 1:
+                raise RuntimeError("No target repo is set. Use Step 2 to create or reuse a repo, "
+                                   "or run Build once so the app knows owner/repo.")
+            src = self._get_source_path()
+            scope_set = {s.strip() for s in (self.gh_scopes or "").split(",") if s.strip()}
+            if scope_set and "repo" not in scope_set and "public_repo" not in scope_set:
+                raise RuntimeError("Token is missing 'repo' scope, which is required to push. "
+                                   "Regenerate a classic token with 'repo' (and 'workflow' for workflows).")
+            has_workflow = (src / ".github" / "workflows").exists()
+            if has_workflow and scope_set and "workflow" not in scope_set:
+                raise RuntimeError("This folder contains .github/workflows, so pushing it requires the token "
+                                   "'workflow' scope. Add it to the token, or remove the workflow before pushing.")
+            self.log(f"Pushing '{src}' to {repo_full}@main ...")
+            self._push_folder(src, repo_full, "main", self.pub_commit_var.get().strip() or "Update main")
+            self.build_repo = repo_full
+            self.save_config()
+            self.log("main is up to date. To rebuild, bump APP_VERSION and update the tag with the Build button "
+                     "(tag builds use the workflow from the tagged commit).", "OK")
+            self.root.after(0, lambda: self.alert(
+                "Push main",
+                f"Pushed to {repo_full}@main.\n\nTo trigger a rebuild, click Build and push an updated version tag.",
+                "info"))
+        self._async(work, "Push main")
 
     def _pub_validate(self):
         def work():
