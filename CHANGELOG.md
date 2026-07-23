@@ -2,6 +2,20 @@
 
 All notable changes to GitHub PR Agent are documented here. Newest entries on top.
 
+## v2.4.0 - 2026-07-23
+
+### Added
+- **Multi-user PAT vault.** The vault now stores many users' PATs, each encrypted under
+  its own master passphrase and keyed by a user/label. The vault dialog has a user picker:
+  choose a user, enter that user's passphrase, and **Unlock and fill** to populate Step 1.
+  - **Auto-connect on fill:** unlocking a PAT now immediately calls Connect, so the user is
+    signed in without a second click.
+  - **Per-user save/delete:** save or update a PAT under any label; delete a single user's
+    entry (requires that user's passphrase). **Reset all** (phrase `MikeLariosWasHere!`)
+    still wipes every stored user.
+  - **Backward compatible:** an existing single-entry (v1) vault is transparently wrapped
+    as a `default` user without needing the passphrase.
+
 ## v2.3.0 - 2026-07-23
 
 ### Changed

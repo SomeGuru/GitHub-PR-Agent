@@ -56,7 +56,7 @@ if sys.stderr is None:
     sys.stderr = open(os.devnull, "w", encoding="utf-8")
 
 APP_NAME = "GitHub PR Agent"
-APP_VERSION = "2.3.0"
+APP_VERSION = "2.4.0"
 UPDATE_REPO = "SomeGuru/GitHub-PR-Agent"
 UPDATE_BRANCH = "main"
 UPDATE_SCRIPT_NAME = "GitHub_PR_Agent.py"
@@ -207,6 +207,30 @@ def vault_decrypt(passphrase: str, blob: dict) -> str:
         raise ValueError("Wrong passphrase, or the vault has been tampered with.")
     ks = _vault_keystream(enc_key, nonce, len(ct))
     return bytes(a ^ b for a, b in zip(ct, ks)).decode("utf-8")
+
+
+def vault_load() -> dict:
+    """Return the multi-user vault as {"v": 2, "entries": {label: blob}}.
+    Transparently wraps a legacy v1 single-entry file (encrypted blob at the top
+    level) under the label 'default' without needing the passphrase."""
+    if not VAULT_FILE.exists():
+        return {"v": 2, "entries": {}}
+    try:
+        data = json.loads(VAULT_FILE.read_text(encoding="utf-8"))
+    except Exception:
+        return {"v": 2, "entries": {}}
+    if isinstance(data, dict) and isinstance(data.get("entries"), dict):
+        return {"v": 2, "entries": data["entries"]}
+    # Legacy v1: the file itself is a single encrypted blob.
+    if isinstance(data, dict) and data.get("ct") and data.get("tag"):
+        return {"v": 2, "entries": {"default": data}}
+    return {"v": 2, "entries": {}}
+
+
+def vault_save(data: dict) -> None:
+    CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+    payload = {"v": 2, "entries": data.get("entries", {})}
+    VAULT_FILE.write_text(json.dumps(payload, indent=2), encoding="utf-8")
 
 
 # ---------------------------------------------------------------------------
@@ -1549,49 +1573,118 @@ class GitHubPRAgent:
         win.transient(self.root)
         win.resizable(False, False)
         win.grab_set()
-        ttk.Label(win, text="Store or unlock a PAT encrypted at rest.", wraplength=520).pack(anchor="w", padx=12, pady=(12, 6))
+        ttk.Label(win, wraplength=560, justify="left", text=(
+            "Store multiple users' PATs, each encrypted at rest under its own master "
+            "passphrase. Pick a user, enter that user's passphrase, and Unlock to fill "
+            "Step 1 and connect automatically."
+        )).pack(anchor="w", padx=12, pady=(12, 6))
+
+        vault = vault_load()
+
         frm = ttk.Frame(win)
         frm.pack(fill="x", padx=12, pady=6)
-        ttk.Label(frm, text="Master passphrase:", width=18).grid(row=0, column=0, sticky="w")
+        ttk.Label(frm, text="User / label:", width=18).grid(row=0, column=0, sticky="w", pady=3)
+        labels = sorted(vault["entries"].keys())
+        default_label = self.gh_user or (labels[0] if labels else "")
+        user_var = tk.StringVar(value=default_label)
+        user_combo = ttk.Combobox(frm, textvariable=user_var, values=labels, width=32)
+        user_combo.grid(row=0, column=1, sticky="w", padx=4, pady=3)
+
+        ttk.Label(frm, text="Master passphrase:", width=18).grid(row=1, column=0, sticky="w", pady=3)
         pw = ttk.Entry(frm, show="•", width=34)
-        pw.grid(row=0, column=1, padx=4)
-        recovered = {"pat": None}
+        pw.grid(row=1, column=1, sticky="w", padx=4, pady=3)
+
+        status = ttk.Label(win, text=(f"{len(labels)} user(s) stored." if labels else "Vault is empty."),
+                           style="Muted.TLabel")
+        status.pack(anchor="w", padx=12, pady=(0, 4))
+
+        def refresh_labels(select=None):
+            v = vault_load()
+            vault["entries"] = v["entries"]
+            new_labels = sorted(vault["entries"].keys())
+            user_combo.configure(values=new_labels)
+            status.config(text=(f"{len(new_labels)} user(s) stored." if new_labels else "Vault is empty."))
+            if select is not None:
+                user_var.set(select)
+
         def unlock():
-            if not VAULT_FILE.exists():
-                self.alert("PAT Vault", "Vault is empty.", "info")
+            label = user_var.get().strip()
+            if not label:
+                self.alert("PAT Vault", "Pick or type the user/label to unlock.", "warn")
+                return
+            entry = vault["entries"].get(label)
+            if not entry:
+                self.alert("PAT Vault", f"No stored PAT for '{label}'.", "warn")
                 return
             try:
-                recovered["pat"] = vault_decrypt(pw.get(), json.loads(VAULT_FILE.read_text(encoding="utf-8")))
-                self.token_var.set(recovered["pat"])
-                self.log("PAT filled from vault. Click Connect.", "OK")
-                win.destroy()
+                pat = vault_decrypt(pw.get(), entry)
             except Exception as e:
                 self.alert("PAT Vault", str(e), "error")
+                return
+            self.token_var.set(pat)
+            self.log(f"PAT for '{label}' filled from vault. Connecting...", "OK")
+            win.destroy()
+            self._connect()
+
         def save():
             pat = self._vault_current_pat()
             if not pat:
-                self.alert("PAT Vault", "Enter a PAT first.", "warn")
+                self.alert("PAT Vault", "Enter or fill a PAT in Step 1 first.", "warn")
+                return
+            label = user_var.get().strip() or self.gh_user.strip()
+            if not label:
+                self.alert("PAT Vault", "Enter a user/label to save this PAT under.", "warn")
                 return
             if len(pw.get()) < 4 or pw.get() == VAULT_RESET_PHRASE:
                 self.alert("PAT Vault", "Use a master passphrase of at least 4 characters. Do not use the reset phrase.", "warn")
                 return
-            CONFIG_DIR.mkdir(parents=True, exist_ok=True)
-            VAULT_FILE.write_text(json.dumps(vault_encrypt(pw.get(), pat), indent=2), encoding="utf-8")
-            self.log("PAT saved to encrypted vault.", "OK")
-            win.destroy()
+            existed = label in vault["entries"]
+            if existed and not messagebox.askyesno("PAT Vault", f"Replace the stored PAT for '{label}'?"):
+                return
+            vault["entries"][label] = vault_encrypt(pw.get(), pat)
+            vault_save(vault)
+            self.log(f"PAT for '{label}' saved to encrypted vault.", "OK")
+            refresh_labels(select=label)
+            pw.delete(0, "end")
+
+        def delete_entry():
+            label = user_var.get().strip()
+            entry = vault["entries"].get(label)
+            if not entry:
+                self.alert("PAT Vault", f"No stored PAT for '{label}'.", "warn")
+                return
+            try:
+                vault_decrypt(pw.get(), entry)
+            except Exception:
+                self.alert("PAT Vault", "Enter that user's correct passphrase to delete their entry.", "error")
+                return
+            if not messagebox.askyesno("PAT Vault", f"Delete stored PAT for '{label}'?"):
+                return
+            vault["entries"].pop(label, None)
+            vault_save(vault)
+            self.log(f"Deleted vault entry for '{label}'.", "WARN")
+            refresh_labels(select="")
+            pw.delete(0, "end")
+
         def reset():
             if pw.get() != VAULT_RESET_PHRASE:
-                self.alert("PAT Vault", "Incorrect reset passphrase.", "error")
+                self.alert("PAT Vault", "Enter the reset passphrase to erase ALL stored users.", "error")
+                return
+            if not messagebox.askyesno("PAT Vault", "This erases EVERY stored user's PAT. Continue?"):
                 return
             if VAULT_FILE.exists():
                 VAULT_FILE.unlink()
-            self.log("Vault reset. Stored PAT erased.", "WARN")
-            win.destroy()
+            vault["entries"] = {}
+            self.log("Vault reset. All stored PATs erased.", "WARN")
+            refresh_labels(select="")
+            pw.delete(0, "end")
+
         btns = ttk.Frame(win)
         btns.pack(fill="x", padx=12, pady=(4, 12))
-        ttk.Button(btns, text="Unlock and fill", command=unlock).pack(side="left")
+        ttk.Button(btns, text="Unlock and fill", command=unlock, style="Accent.TButton").pack(side="left")
         ttk.Button(btns, text="Save PAT", command=save).pack(side="left", padx=6)
-        ttk.Button(btns, text="Reset vault", command=reset).pack(side="left", padx=6)
+        ttk.Button(btns, text="Delete entry", command=delete_entry).pack(side="left", padx=6)
+        ttk.Button(btns, text="Reset all", command=reset).pack(side="left", padx=6)
         ttk.Button(btns, text="Close", command=win.destroy).pack(side="right")
 
     def _save_activity_window(self):
