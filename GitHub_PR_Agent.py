@@ -56,7 +56,7 @@ if sys.stderr is None:
     sys.stderr = open(os.devnull, "w", encoding="utf-8")
 
 APP_NAME = "GitHub PR Agent"
-APP_VERSION = "2.2.1"
+APP_VERSION = "2.3.0"
 UPDATE_REPO = "SomeGuru/GitHub-PR-Agent"
 UPDATE_BRANCH = "main"
 UPDATE_SCRIPT_NAME = "GitHub_PR_Agent.py"
@@ -436,8 +436,9 @@ def yaml_list(items: list[str], indent: str = "      ") -> str:
     return "\n".join(f"{indent}- {item}" for item in items)
 
 
-def render_workflow(build_type: str, branch: str, output_mode: str, py_entry: str, csharp_kind: str, targets: dict) -> str:
+def render_workflow(build_type: str, branch: str, output_mode: str, py_entry: str, csharp_kind: str, targets: dict, app_name: str = "app") -> str:
     branch = branch or "main"
+    app = re.sub(r"[^A-Za-z0-9._-]+", "-", (app_name or "app").strip()).strip("-") or "app"
     release_enabled = output_mode == "Release on tags"
     on_block = (
         "on:\n"
@@ -466,7 +467,7 @@ def render_workflow(build_type: str, branch: str, output_mode: str, py_entry: st
         entry = py_entry or "main.py"
         if targets.get("windows", True):
             jobs.append(f"""  build-windows:
-    name: Build Python (Windows)
+    name: Build {app} (Windows)
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
@@ -478,14 +479,12 @@ def render_workflow(build_type: str, branch: str, output_mode: str, py_entry: st
         run: |
           python -m pip install --upgrade pip pyinstaller
           if (Test-Path requirements.txt) {{ python -m pip install -r requirements.txt }}
-      - name: Build
-        run: pyinstaller --noconfirm --windowed --name app --distpath dist "{entry}"
-      - name: Package
-        run: Compress-Archive -Path dist/* -DestinationPath app-windows.zip
+      - name: Build single-file executable
+        run: pyinstaller --noconfirm --onefile --windowed --name "{app}" --distpath dist "{entry}"
       - uses: actions/upload-artifact@v4
         with:
-          name: app-windows
-          path: app-windows.zip
+          name: {app}-windows
+          path: dist/{app}.exe
 """)
             needs.append("build-windows")
         for distro, image, install, pipflags, envblock in [
@@ -494,7 +493,7 @@ def render_workflow(build_type: str, branch: str, output_mode: str, py_entry: st
         ]:
             if targets.get(distro, False):
                 jobs.append(f"""  build-{distro}:
-    name: Build Python ({distro})
+    name: Build {app} ({distro})
     runs-on: ubuntu-latest
     container: {image}
 {envblock}    steps:
@@ -503,14 +502,12 @@ def render_workflow(build_type: str, branch: str, output_mode: str, py_entry: st
         run: {install}
       - name: Install project dependencies
         run: if [ -f requirements.txt ]; then pip3 install {pipflags}-r requirements.txt; fi
-      - name: Build
-        run: pyinstaller --noconfirm --onefile --name app-{distro} --distpath dist "{entry}"
-      - name: Package
-        run: tar -czf app-{distro}.tar.gz -C dist .
+      - name: Build single-file executable
+        run: pyinstaller --noconfirm --onefile --name "{app}-{distro}" --distpath dist "{entry}"
       - uses: actions/upload-artifact@v4
         with:
-          name: app-{distro}
-          path: app-{distro}.tar.gz
+          name: {app}-{distro}
+          path: dist/{app}-{distro}
 """)
                 needs.append(f"build-{distro}")
 
@@ -1289,12 +1286,26 @@ class GitHubPRAgent:
             for item in created:
                 self.log(f"Created missing dependency/default file: {item}", "OK")
         targets = self._targets()
-        workflow = render_workflow(build_type, self.pub_branch_var.get().strip() or "main", self.build_output_var.get(), py_entry, self.csharp_kind_var.get(), targets)
+        app_name = self._product_name()
+        self.log(f"Release/executable name: {app_name}", "OK")
+        workflow = render_workflow(build_type, self.pub_branch_var.get().strip() or "main", self.build_output_var.get(), py_entry, self.csharp_kind_var.get(), targets, app_name)
         wf = src / ".github" / "workflows" / "build.yml"
         wf.parent.mkdir(parents=True, exist_ok=True)
         wf.write_text(workflow, encoding="utf-8")
         self.log("Wrote .github/workflows/build.yml", "OK")
         return build_type, created + [".github/workflows/build.yml"]
+
+    def _product_name(self) -> str:
+        """Name used for build executables and release assets. Prefers the repo name,
+        falls back to the target repo's name, then to 'app'."""
+        candidates = [
+            self.pub_name_var.get().strip(),
+            (self.pub_repo_full.split("/")[-1] if self.pub_repo_full else ""),
+            (self.build_repo.split("/")[-1] if self.build_repo else ""),
+        ]
+        raw = next((c for c in candidates if c), "app")
+        cleaned = re.sub(r"[^A-Za-z0-9._-]+", "-", raw).strip("-")
+        return cleaned or "app"
 
     def _targets(self) -> dict:
         return {

@@ -2,6 +2,20 @@
 
 All notable changes to GitHub PR Agent are documented here. Newest entries on top.
 
+## v2.3.0 - 2026-07-23
+
+### Changed
+- **Release assets are now the raw executables, named after the app** (not generic
+  `app-windows.zip` / `app-fedora.tar.gz`). For a repo named `GitHub-PR-Agent` the release
+  now contains `GitHub-PR-Agent.exe`, `GitHub-PR-Agent-fedora`, and
+  `GitHub-PR-Agent-debian`, downloadable directly with no unzip step.
+  - The Windows Python job now builds a single-file `--onefile --windowed` `.exe` and
+    uploads it directly; the Linux jobs upload the single-file binaries directly. The
+    `Compress-Archive` / `tar` packaging steps were removed for Python builds.
+  - `render_workflow` takes an `app_name`, derived from the repository name via the new
+    `_product_name()` helper (sanitized to a filesystem-safe token). The chosen name is
+    logged before pushing.
+
 ## v2.2.1 - 2026-07-23
 
 ### Fixed
