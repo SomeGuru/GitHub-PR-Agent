@@ -56,7 +56,7 @@ if sys.stderr is None:
     sys.stderr = open(os.devnull, "w", encoding="utf-8")
 
 APP_NAME = "GitHub PR Agent"
-APP_VERSION = "2.1.0"
+APP_VERSION = "2.1.1"
 UPDATE_REPO = "SomeGuru/GitHub-PR-Agent"
 UPDATE_BRANCH = "main"
 UPDATE_SCRIPT_NAME = "GitHub_PR_Agent.py"
@@ -488,9 +488,9 @@ def render_workflow(build_type: str, branch: str, output_mode: str, py_entry: st
           path: app-windows.zip
 """)
             needs.append("build-windows")
-        for distro, image, install in [
-            ("fedora", "fedora:latest", "dnf -y install python3 python3-pip python3-tkinter binutils && pip3 install --upgrade pyinstaller"),
-            ("debian", "debian:latest", "apt-get update && apt-get -y install python3 python3-pip python3-tk binutils && pip3 install --break-system-packages --upgrade pyinstaller"),
+        for distro, image, install, pipflags in [
+            ("fedora", "fedora:latest", "dnf -y install python3 python3-pip python3-tkinter binutils && pip3 install --upgrade pyinstaller", ""),
+            ("debian", "debian:latest", "apt-get update && apt-get -y install python3 python3-pip python3-tk binutils && pip3 install --break-system-packages --upgrade pyinstaller", "--break-system-packages "),
         ]:
             if targets.get(distro, False):
                 jobs.append(f"""  build-{distro}:
@@ -502,7 +502,7 @@ def render_workflow(build_type: str, branch: str, output_mode: str, py_entry: st
       - name: Install dependencies
         run: {install}
       - name: Install project dependencies
-        run: if [ -f requirements.txt ]; then pip3 install -r requirements.txt; fi
+        run: if [ -f requirements.txt ]; then pip3 install {pipflags}-r requirements.txt; fi
       - name: Build
         run: pyinstaller --noconfirm --onefile --name app-{distro} --distpath dist "{entry}"
       - name: Package

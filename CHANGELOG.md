@@ -2,6 +2,14 @@
 
 All notable changes to GitHub PR Agent are documented here. Newest entries on top.
 
+## v2.1.1 - 2026-07-23
+
+### Fixed
+- **Debian release build failed at "Install project dependencies"** with PEP 668
+  `externally-managed-environment`. The generated Python workflow now passes
+  `--break-system-packages` on the Debian `pip3 install -r requirements.txt` step
+  (matching the pyinstaller install), so the Debian job and the release publish succeed.
+
 ## v2.1.0 - 2026-07-23
 
 Consolidation of the generic publishing-gateway rewrite (Option B) as the canonical
