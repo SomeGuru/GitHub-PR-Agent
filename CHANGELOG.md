@@ -2,6 +2,16 @@
 
 All notable changes to GitHub PR Agent are documented here. Newest entries on top.
 
+## v2.4.1 - 2026-07-27
+
+### Changed
+- **Bumped the pinned GitHub Actions versions** in the generated `build.yml` to their
+  current latest majors: `actions/checkout@v7`, `actions/setup-python@v7`,
+  `actions/upload-artifact@v7`, `actions/download-artifact@v8`, `actions/setup-node@v7`,
+  `actions/setup-go@v7`, `actions/setup-java@v5`, `actions/setup-dotnet@v6`, and
+  `softprops/action-gh-release@v3`. `actions-rust-lang/setup-rust-toolchain@v1` is already
+  current. Keeps generated workflows off deprecated Node.js runner versions.
+
 ## v2.4.0 - 2026-07-23
 
 ### Added

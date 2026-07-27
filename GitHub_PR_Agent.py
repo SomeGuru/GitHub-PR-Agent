@@ -56,7 +56,7 @@ if sys.stderr is None:
     sys.stderr = open(os.devnull, "w", encoding="utf-8")
 
 APP_NAME = "GitHub PR Agent"
-APP_VERSION = "2.4.0"
+APP_VERSION = "2.4.1"
 UPDATE_REPO = "SomeGuru/GitHub-PR-Agent"
 UPDATE_BRANCH = "main"
 UPDATE_SCRIPT_NAME = "GitHub_PR_Agent.py"
@@ -494,8 +494,8 @@ def render_workflow(build_type: str, branch: str, output_mode: str, py_entry: st
     name: Build {app} (Windows)
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
         with:
           python-version: '3.12'
       - name: Install dependencies
@@ -505,7 +505,7 @@ def render_workflow(build_type: str, branch: str, output_mode: str, py_entry: st
           if (Test-Path requirements.txt) {{ python -m pip install -r requirements.txt }}
       - name: Build single-file executable
         run: pyinstaller --noconfirm --onefile --windowed --name "{app}" --distpath dist "{entry}"
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: {app}-windows
           path: dist/{app}.exe
@@ -521,14 +521,14 @@ def render_workflow(build_type: str, branch: str, output_mode: str, py_entry: st
     runs-on: ubuntu-latest
     container: {image}
 {envblock}    steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Install dependencies
         run: {install}
       - name: Install project dependencies
         run: if [ -f requirements.txt ]; then pip3 install {pipflags}-r requirements.txt; fi
       - name: Build single-file executable
         run: pyinstaller --noconfirm --onefile --name "{app}-{distro}" --distpath dist "{entry}"
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: {app}-{distro}
           path: dist/{app}-{distro}
@@ -543,8 +543,8 @@ def render_workflow(build_type: str, branch: str, output_mode: str, py_entry: st
     name: Build .NET (Windows)
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-dotnet@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-dotnet@v6
         with:
           dotnet-version: '8.0.x'
       - name: Restore
@@ -553,7 +553,7 @@ def render_workflow(build_type: str, branch: str, output_mode: str, py_entry: st
         run: dotnet publish -c Release -o dist
       - name: Package
         run: Compress-Archive -Path dist/* -DestinationPath app-windows.zip
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: app-windows
           path: app-windows.zip
@@ -566,8 +566,8 @@ def render_workflow(build_type: str, branch: str, output_mode: str, py_entry: st
     name: Build .NET ({osname})
     runs-on: {runner}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-dotnet@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-dotnet@v6
         with:
           dotnet-version: '8.0.x'
       - name: Restore
@@ -576,7 +576,7 @@ def render_workflow(build_type: str, branch: str, output_mode: str, py_entry: st
         run: dotnet publish -c Release -o dist
       - name: Package
         run: tar -czf app-{osname}.tar.gz -C dist .
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: app-{osname}
           path: app-{osname}.tar.gz
@@ -588,8 +588,8 @@ def render_workflow(build_type: str, branch: str, output_mode: str, py_entry: st
     name: Build JavaScript / Node
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
         with:
           node-version: '20'
       - name: Install dependencies
@@ -602,7 +602,7 @@ def render_workflow(build_type: str, branch: str, output_mode: str, py_entry: st
         run: |
           mkdir -p dist
           tar --exclude=.git --exclude=node_modules -czf app-node.tar.gz .
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: app-node
           path: app-node.tar.gz
@@ -614,8 +614,8 @@ def render_workflow(build_type: str, branch: str, output_mode: str, py_entry: st
     name: Build Go
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
         with:
           go-version: '1.22'
       - name: Build
@@ -624,7 +624,7 @@ def render_workflow(build_type: str, branch: str, output_mode: str, py_entry: st
           go build -o dist/app ./...
       - name: Package
         run: tar -czf app-go.tar.gz -C dist .
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: app-go
           path: app-go.tar.gz
@@ -636,13 +636,13 @@ def render_workflow(build_type: str, branch: str, output_mode: str, py_entry: st
     name: Build Rust
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: actions-rust-lang/setup-rust-toolchain@v1
       - name: Build
         run: cargo build --release
       - name: Package
         run: tar -czf app-rust.tar.gz -C target/release .
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: app-rust
           path: app-rust.tar.gz
@@ -654,14 +654,14 @@ def render_workflow(build_type: str, branch: str, output_mode: str, py_entry: st
     name: Build Java Maven
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-java@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-java@v5
         with:
           distribution: 'temurin'
           java-version: '17'
       - name: Build
         run: mvn -B package
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: app-java-maven
           path: target/**/*
@@ -673,14 +673,14 @@ def render_workflow(build_type: str, branch: str, output_mode: str, py_entry: st
     name: Build Java Gradle
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-java@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-java@v5
         with:
           distribution: 'temurin'
           java-version: '17'
       - name: Build
         run: gradle build
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: app-java-gradle
           path: build/libs/**/*
@@ -692,10 +692,10 @@ def render_workflow(build_type: str, branch: str, output_mode: str, py_entry: st
     name: Package static website
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Package
         run: tar --exclude=.git -czf static-site.tar.gz .
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: static-site
           path: static-site.tar.gz
@@ -707,10 +707,10 @@ def render_workflow(build_type: str, branch: str, output_mode: str, py_entry: st
     name: Package source
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Package source
         run: tar --exclude=.git -czf source.tar.gz .
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: source
           path: source.tar.gz
@@ -729,11 +729,11 @@ def render_workflow(build_type: str, branch: str, output_mode: str, py_entry: st
             "    permissions:\n"
             "      contents: write\n"
             "    steps:\n"
-            "      - uses: actions/download-artifact@v4\n"
+            "      - uses: actions/download-artifact@v8\n"
             "        with:\n"
             "          path: artifacts\n"
             "      - name: Publish release\n"
-            "        uses: softprops/action-gh-release@v2\n"
+            "        uses: softprops/action-gh-release@v3\n"
             "        with:\n"
             "          tag_name: ${{ github.ref_name }}\n"
             "          files: artifacts/**/*\n"
