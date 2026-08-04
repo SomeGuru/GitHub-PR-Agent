@@ -240,6 +240,19 @@ def safe_rel(path: Path, root: Path) -> str:
     return path.relative_to(root).as_posix()
 
 
+def project_relative_path(path_text: str, root: Path) -> str:
+    raw = (path_text or "").strip().strip('"').strip("'")
+    if not raw:
+        return ""
+    root = root.resolve()
+    candidate = Path(raw)
+    resolved = candidate.resolve() if candidate.is_absolute() else (root / candidate).resolve()
+    try:
+        return safe_rel(resolved, root)
+    except ValueError as e:
+        raise RuntimeError("Selected file must be inside the project folder.") from e
+
+
 def find_files(root: Path, patterns: tuple[str, ...]) -> list[Path]:
     found = []
     for pat in patterns:
@@ -266,8 +279,10 @@ def detect_project_type(root: Path) -> str | None:
 
 def choose_python_entry_interactive(root: tk.Tk, project_root: Path, current: str = "") -> str:
     py_files = [p for p in find_files(project_root, ("*.py",)) if p.name not in {"setup.py"}]
-    if current and (project_root / current).exists():
-        return current
+    if current:
+        normalized = project_relative_path(current, project_root)
+        if (project_root / normalized).exists():
+            return normalized
     if not py_files:
         raise RuntimeError("Python build selected, but no .py files were found.")
     preferred = ["main.py", "app.py", "run.py", "gui.py"]
@@ -292,11 +307,7 @@ def choose_python_entry_interactive(root: tk.Tk, project_root: Path, current: st
     )
     if not selected:
         raise RuntimeError("Python build needs a main .py file. Select one or change the build type.")
-    p = Path(selected).resolve()
-    try:
-        return safe_rel(p, project_root.resolve())
-    except ValueError as e:
-        raise RuntimeError("Selected Python file must be inside the project folder.") from e
+    return project_relative_path(selected, project_root)
 
 
 def ensure_python_files(project_root: Path, entry_file: str) -> list[str]:
@@ -1476,6 +1487,7 @@ class GitHubPRAgent:
         py_entry = self.py_entry_var.get().strip()
         if build_type == "Python":
             py_entry = choose_python_entry_interactive(self.root, src, py_entry) if interactive else (py_entry or "main.py")
+            py_entry = project_relative_path(py_entry, src)
             self.root.after(0, lambda: self.py_entry_var.set(py_entry))
         created = []
         if self.pub_scaffold_var.get():

@@ -13,6 +13,11 @@ All notable changes to GitHub PR Agent are documented here. Newest entries on to
 - **Save and load configuration buttons.** Export the current publishing and build
   settings to JSON and load them later. Personal Access Tokens are never included.
 
+### Fixed
+- **Portable Python workflow paths.** Python entry files are normalized to paths relative
+  to the repository before generating `build.yml`, preventing local Windows paths from
+  breaking GitHub-hosted Windows and Linux builds.
+
 ## v2.4.1 - 2026-07-27
 
 ### Changed
