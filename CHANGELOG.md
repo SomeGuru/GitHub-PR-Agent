@@ -2,6 +2,17 @@
 
 All notable changes to GitHub PR Agent are documented here. Newest entries on top.
 
+## v2.5.0 - 2026-08-04
+
+### Added
+- **Repository picker in Step 2.** Connecting to GitHub now loads repositories owned by
+  the connected user into an editable list. Select an existing repository or type a new
+  name before clicking **Create or reuse repository**.
+- **Existing repository details.** Selecting or reusing a repository automatically fills
+  its current GitHub description and privacy setting.
+- **Save and load configuration buttons.** Export the current publishing and build
+  settings to JSON and load them later. Personal Access Tokens are never included.
+
 ## v2.4.1 - 2026-07-27
 
 ### Changed

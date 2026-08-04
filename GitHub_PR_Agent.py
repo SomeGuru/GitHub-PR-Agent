@@ -56,7 +56,7 @@ if sys.stderr is None:
     sys.stderr = open(os.devnull, "w", encoding="utf-8")
 
 APP_NAME = "GitHub PR Agent"
-APP_VERSION = "2.4.1"
+APP_VERSION = "2.5.0"
 UPDATE_REPO = "SomeGuru/GitHub-PR-Agent"
 UPDATE_BRANCH = "main"
 UPDATE_SCRIPT_NAME = "GitHub_PR_Agent.py"
@@ -765,6 +765,8 @@ class GitHubPRAgent:
         self.pub_repo_private = False
         self.pub_source_dir = ""
         self.build_repo = ""
+        self.repo_catalog = {}
+        self._selected_repo_name = ""
         self._status_labels = []
         self._canvases = []
 
@@ -785,33 +787,107 @@ class GitHubPRAgent:
             pass
         return {}
 
+    def _config_data(self) -> dict:
+        return {
+            "schema_version": 1,
+            "pub_name": self.pub_name_var.get().strip(),
+            "pub_desc": self.pub_desc_var.get().strip(),
+            "pub_private": bool(self.pub_private_var.get()),
+            "pub_source": self.pub_source_var.get().strip(),
+            "pub_branch": self.pub_branch_var.get().strip(),
+            "pub_commit": self.pub_commit_var.get().strip(),
+            "pub_scaffold": bool(self.pub_scaffold_var.get()),
+            "build_enabled": bool(self.build_enabled_var.get()),
+            "build_type": self.build_type_var.get(),
+            "build_output_mode": self.build_output_var.get(),
+            "py_entry": self.py_entry_var.get().strip(),
+            "csharp_kind": self.csharp_kind_var.get(),
+            "target_windows": bool(self.target_windows_var.get()),
+            "target_linux": bool(self.target_linux_var.get()),
+            "target_macos": bool(self.target_macos_var.get()),
+            "target_fedora": bool(self.target_fedora_var.get()),
+            "target_debian": bool(self.target_debian_var.get()),
+            "build_repo": self.build_repo,
+            "theme": self.theme_name,
+        }
+
     def save_config(self):
         try:
             CONFIG_DIR.mkdir(parents=True, exist_ok=True)
-            data = {
-                "pub_name": self.pub_name_var.get().strip(),
-                "pub_desc": self.pub_desc_var.get().strip(),
-                "pub_private": bool(self.pub_private_var.get()),
-                "pub_source": self.pub_source_var.get().strip(),
-                "pub_branch": self.pub_branch_var.get().strip(),
-                "pub_commit": self.pub_commit_var.get().strip(),
-                "pub_scaffold": bool(self.pub_scaffold_var.get()),
-                "build_enabled": bool(self.build_enabled_var.get()),
-                "build_type": self.build_type_var.get(),
-                "build_output_mode": self.build_output_var.get(),
-                "py_entry": self.py_entry_var.get().strip(),
-                "csharp_kind": self.csharp_kind_var.get(),
-                "target_windows": bool(self.target_windows_var.get()),
-                "target_linux": bool(self.target_linux_var.get()),
-                "target_macos": bool(self.target_macos_var.get()),
-                "target_fedora": bool(self.target_fedora_var.get()),
-                "target_debian": bool(self.target_debian_var.get()),
-                "build_repo": self.build_repo,
-                "theme": self.theme_name,
-            }
-            CONFIG_FILE.write_text(json.dumps(data, indent=2), encoding="utf-8")
+            CONFIG_FILE.write_text(json.dumps(self._config_data(), indent=2), encoding="utf-8")
         except Exception as e:
             self.log(f"Could not save config: {e}", "WARN")
+
+    def _apply_config(self, data: dict):
+        if not isinstance(data, dict):
+            raise RuntimeError("The selected configuration is not a JSON object.")
+        self.pub_name_var.set(str(data.get("pub_name", "")))
+        self.pub_desc_var.set(str(data.get("pub_desc", "")))
+        self.pub_private_var.set(bool(data.get("pub_private", False)))
+        self.pub_source_var.set(str(data.get("pub_source", "")))
+        self.pub_branch_var.set(str(data.get("pub_branch", "main")))
+        self.pub_commit_var.set(str(data.get("pub_commit", "Initial commit")))
+        self.pub_scaffold_var.set(bool(data.get("pub_scaffold", True)))
+        self.build_enabled_var.set(bool(data.get("build_enabled", False)))
+        build_type = str(data.get("build_type", "Auto Detect"))
+        self.build_type_var.set(build_type if build_type in BUILD_TYPES else "Auto Detect")
+        output_mode = str(data.get("build_output_mode", "Upload artifacts only"))
+        self.build_output_var.set(output_mode if output_mode in OUTPUT_MODES else "Upload artifacts only")
+        self.py_entry_var.set(str(data.get("py_entry", "")))
+        csharp_kind = str(data.get("csharp_kind", "Windows Desktop App"))
+        self.csharp_kind_var.set(csharp_kind if csharp_kind in CSHARP_KINDS else "Windows Desktop App")
+        self.target_windows_var.set(bool(data.get("target_windows", True)))
+        self.target_linux_var.set(bool(data.get("target_linux", False)))
+        self.target_macos_var.set(bool(data.get("target_macos", False)))
+        self.target_fedora_var.set(bool(data.get("target_fedora", False)))
+        self.target_debian_var.set(bool(data.get("target_debian", False)))
+        self.build_repo = str(data.get("build_repo", ""))
+        theme = str(data.get("theme", self.theme_name)).lower()
+        if theme in THEMES and theme != self.theme_name:
+            self.theme_name = theme
+            self._apply_theme()
+        self._selected_repo_name = ""
+        self._clear_repo_target()
+        self.pub_repo_label.config(text="")
+        self._build_toggle()
+        self._repo_name_selected()
+
+    def _save_configuration_as(self):
+        try:
+            CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+            path = filedialog.asksaveasfilename(
+                title="Save GitHub PR Agent configuration",
+                initialdir=str(CONFIG_DIR),
+                initialfile="github-pr-agent-config.json",
+                defaultextension=".json",
+                filetypes=[("JSON configuration", "*.json"), ("All files", "*.*")],
+                parent=self.root,
+            )
+            if not path:
+                return
+            Path(path).write_text(json.dumps(self._config_data(), indent=2), encoding="utf-8")
+            self.save_config()
+            self.log(f"Configuration saved -> {path}", "OK")
+        except Exception as e:
+            self.alert("Save configuration", str(e))
+
+    def _load_configuration_from(self):
+        try:
+            CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+            path = filedialog.askopenfilename(
+                title="Load GitHub PR Agent configuration",
+                initialdir=str(CONFIG_DIR),
+                filetypes=[("JSON configuration", "*.json"), ("All files", "*.*")],
+                parent=self.root,
+            )
+            if not path:
+                return
+            data = json.loads(Path(path).read_text(encoding="utf-8"))
+            self._apply_config(data)
+            self.save_config()
+            self.log(f"Configuration loaded <- {path}", "OK")
+        except Exception as e:
+            self.alert("Load configuration", str(e))
 
     # Theming ---------------------------------------------------------------
     def _apply_theme(self):
@@ -913,6 +989,8 @@ class GitHubPRAgent:
         ttk.Button(btns, text="⬆ Push main", command=self._push_main).pack(side="left", padx=6)
         ttk.Button(btns, text="Build", command=self.open_build_release, style="Accent.TButton").pack(side="left", padx=6)
         ttk.Button(btns, text="🔒 PAT Vault", command=self.open_vault).pack(side="left", padx=6)
+        ttk.Button(btns, text="Save configuration", command=self._save_configuration_as).pack(side="left", padx=6)
+        ttk.Button(btns, text="Load configuration", command=self._load_configuration_from).pack(side="left", padx=6)
         ttk.Button(btns, text="⬭ Check for updates", command=self._check_for_updates).pack(side="left", padx=6)
         ttk.Label(btns, text=f"v{APP_VERSION}", style="Muted.TLabel").pack(side="right", padx=6)
         self.theme_btn = ttk.Button(btns, text="🌙 Dark", command=self._toggle_theme)
@@ -961,7 +1039,11 @@ class GitHubPRAgent:
         r1.pack(fill="x", padx=6, pady=4)
         ttk.Label(r1, text="Repo name:").pack(side="left")
         self.pub_name_var = tk.StringVar(value=self.cfg.get("pub_name", ""))
-        ttk.Entry(r1, textvariable=self.pub_name_var, width=36).pack(side="left", padx=6)
+        self.pub_name_combo = ttk.Combobox(r1, textvariable=self.pub_name_var, width=36, state="normal")
+        self.pub_name_combo.pack(side="left", padx=6)
+        self.pub_name_combo.bind("<<ComboboxSelected>>", lambda _e: self._repo_choice_changed())
+        self.pub_name_combo.bind("<KeyRelease>", lambda _e: self._repo_name_typed())
+        ttk.Button(r1, text="Refresh list", command=self._refresh_repositories).pack(side="left", padx=(0, 6))
         self.pub_private_var = tk.BooleanVar(value=self.cfg.get("pub_private", False))
         ttk.Checkbutton(r1, text="Private", variable=self.pub_private_var).pack(side="left", padx=6)
         ttk.Button(r1, text="Create or reuse repository", command=self._pub_create_repo, style="Accent.TButton").pack(side="left", padx=6)
@@ -972,6 +1054,8 @@ class GitHubPRAgent:
         ttk.Label(r2, text="Description:").pack(side="left")
         self.pub_desc_var = tk.StringVar(value=self.cfg.get("pub_desc", ""))
         ttk.Entry(r2, textvariable=self.pub_desc_var, width=72).pack(side="left", padx=6)
+        self.repo_list_status = ttk.Label(r2, text="Connect to load your repositories.", style="Muted.TLabel")
+        self.repo_list_status.pack(side="left", padx=8)
 
     def _build_build_options(self, parent):
         s = ttk.LabelFrame(parent, text="Step 2b: Optional build automation")
@@ -1183,11 +1267,97 @@ class GitHubPRAgent:
                 elif scope_set and "workflow" not in scope_set:
                     self.log("Note: token has no 'workflow' scope. Enable it before pushing build automation or tagging releases.", "WARN")
             self.root.after(0, self._refresh_status)
+            try:
+                self._load_user_repositories()
+            except RuntimeError as e:
+                self.log(f"Connected, but repositories could not be loaded: {e}", "WARN")
+                self.root.after(
+                    0,
+                    lambda: self.repo_list_status.config(
+                        text="Connected, but the repository list could not be loaded. Click Refresh list to retry."
+                    ),
+                )
         self._async(work, "Connect")
 
     def _refresh_status(self):
         for lbl in self._status_labels:
             lbl.config(text=f"Connected: {self.gh_user}", foreground="#060")
+
+    def _load_user_repositories(self):
+        if not self.gh_user:
+            raise RuntimeError("Connect first.")
+        repos = []
+        page = 1
+        while True:
+            _, batch = self._api(
+                "GET",
+                f"/user/repos?affiliation=owner&sort=updated&direction=desc&per_page=100&page={page}",
+            )
+            if not isinstance(batch, list):
+                raise RuntimeError("GitHub returned an unexpected repository list.")
+            repos.extend(
+                repo for repo in batch
+                if str(repo.get("owner", {}).get("login", "")).lower() == self.gh_user.lower()
+            )
+            if len(batch) < 100:
+                break
+            page += 1
+        self.repo_catalog = {
+            str(repo.get("name")): repo
+            for repo in repos
+            if repo.get("name")
+        }
+        self.root.after(0, self._apply_repository_list)
+
+    def _apply_repository_list(self):
+        names = sorted(self.repo_catalog, key=str.casefold)
+        self.pub_name_combo.configure(values=names)
+        self.repo_list_status.config(
+            text=f"{len(names)} repositories loaded. Select one or type a new name."
+        )
+        self.log(f"Loaded {len(names)} repositories for {self.gh_user}.", "OK")
+        self._repo_name_selected()
+
+    def _refresh_repositories(self):
+        self._async(self._load_user_repositories, "Refresh repositories")
+
+    def _clear_repo_target(self):
+        self.pub_repo_full = ""
+        self.pub_repo_url = ""
+        self.pub_default_branch = "main"
+        self.pub_repo_private = False
+
+    def _repo_choice_changed(self):
+        self._clear_repo_target()
+        self._repo_name_selected()
+
+    def _repo_name_typed(self):
+        name = self.pub_name_var.get().strip()
+        self._clear_repo_target()
+        if name in self.repo_catalog:
+            self._repo_name_selected()
+            return
+        if self._selected_repo_name:
+            self.pub_desc_var.set("")
+            self.pub_private_var.set(False)
+        self._selected_repo_name = ""
+        self.pub_repo_label.config(text="New repository name")
+
+    def _repo_name_selected(self):
+        name = self.pub_name_var.get().strip()
+        info = self.repo_catalog.get(name)
+        if not info:
+            return
+        self._selected_repo_name = name
+        self.pub_desc_var.set(str(info.get("description") or ""))
+        self.pub_private_var.set(bool(info.get("private")))
+        self.pub_repo_label.config(text="Existing repository selected")
+
+    def _apply_reused_repository(self, info: dict, full: str):
+        self._selected_repo_name = self.pub_name_var.get().strip()
+        self.pub_desc_var.set(str(info.get("description") or ""))
+        self.pub_private_var.set(bool(info.get("private")))
+        self.pub_repo_label.config(text=f"-> {self.pub_repo_full or full}")
 
     def _pub_create_repo(self):
         def work():
@@ -1208,8 +1378,9 @@ class GitHubPRAgent:
                 self.pub_repo_url = info.get("html_url", f"https://github.com/{full}")
                 self.pub_default_branch = info.get("default_branch", "main")
                 self.pub_repo_private = bool(info.get("private"))
+                self.repo_catalog[name] = info
                 self.log(f"Repository already exists, reusing: {self.pub_repo_url}", "OK")
-                self.root.after(0, lambda: self.pub_repo_label.config(text=f"-> {self.pub_repo_full}"))
+                self.root.after(0, lambda: self._apply_reused_repository(info, full))
                 self.save_config()
                 return
             payload = {
@@ -1224,7 +1395,9 @@ class GitHubPRAgent:
             self.pub_repo_url = created.get("html_url", f"https://github.com/{full}")
             self.pub_default_branch = created.get("default_branch") or self.pub_branch_var.get().strip() or "main"
             self.pub_repo_private = bool(created.get("private"))
+            self.repo_catalog[name] = created
             self.log(f"Repository created: {self.pub_repo_url}", "OK")
+            self.root.after(0, self._apply_repository_list)
             self.root.after(0, lambda: self.pub_repo_label.config(text=f"-> {self.pub_repo_full}"))
             self.save_config()
         self._async(work, "Create repository")

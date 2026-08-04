@@ -11,6 +11,11 @@ library plus tkinter.
 
 - **Publish any project.** No fixed project name or entry point is assumed. Point it at a
   folder and push.
+- **Browse or create repositories.** After connecting, Step 2 lists repositories owned by
+  the GitHub user while keeping the name field editable for a new repository. Reusing a
+  repository restores its GitHub description and privacy setting.
+- **Reusable configurations.** Save publishing and build settings to a JSON file and load
+  them in a later session. PATs are intentionally excluded.
 - **Optional build automation.** Enable it to generate `.github/workflows/build.yml` for
   your project type (Python, C#/.NET, Node, Static site, Go, Rust, Java Maven/Gradle) and
   chosen OS targets (Windows, Linux, macOS, Fedora, Debian).
