@@ -30,7 +30,7 @@ jobs:
           python -m pip install --upgrade pip pyinstaller
           if (Test-Path requirements.txt) { python -m pip install -r requirements.txt }
       - name: Build single-file executable
-        run: pyinstaller --noconfirm --onefile --windowed --name "GitHub-PR-Agent" --distpath dist "GitHub_PR_Agent.py"
+        run: pyinstaller --noconfirm --onefile --windowed --name "GitHub-PR-Agent" --distpath dist "C:/Users/v-mikelarios/GitHub_PR_Agent/GitHub_PR_Agent.py"
       - uses: actions/upload-artifact@v7
         with:
           name: GitHub-PR-Agent-windows
@@ -47,7 +47,7 @@ jobs:
       - name: Install project dependencies
         run: if [ -f requirements.txt ]; then pip3 install -r requirements.txt; fi
       - name: Build single-file executable
-        run: pyinstaller --noconfirm --onefile --name "GitHub-PR-Agent-fedora" --distpath dist "GitHub_PR_Agent.py"
+        run: pyinstaller --noconfirm --onefile --name "GitHub-PR-Agent-fedora" --distpath dist "C:/Users/v-mikelarios/GitHub_PR_Agent/GitHub_PR_Agent.py"
       - uses: actions/upload-artifact@v7
         with:
           name: GitHub-PR-Agent-fedora
@@ -66,7 +66,7 @@ jobs:
       - name: Install project dependencies
         run: if [ -f requirements.txt ]; then pip3 install --break-system-packages -r requirements.txt; fi
       - name: Build single-file executable
-        run: pyinstaller --noconfirm --onefile --name "GitHub-PR-Agent-debian" --distpath dist "GitHub_PR_Agent.py"
+        run: pyinstaller --noconfirm --onefile --name "GitHub-PR-Agent-debian" --distpath dist "C:/Users/v-mikelarios/GitHub_PR_Agent/GitHub_PR_Agent.py"
       - uses: actions/upload-artifact@v7
         with:
           name: GitHub-PR-Agent-debian
@@ -94,3 +94,4 @@ jobs:
           fail_on_unmatched_files: false
           generate_release_notes: true
           token: ${{ secrets.GITHUB_TOKEN }}
+
